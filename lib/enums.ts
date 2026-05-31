@@ -6,6 +6,7 @@ export const LEVELS = ["LOW", "MEDIUM", "HIGH"] as const;
 export const SENTIMENTS = ["BULLISH", "NEUTRAL", "BEARISH", "MIXED"] as const;
 export const CYCLE_STAGES = ["DORMANT", "EMERGING", "HEATING_UP", "CROWDED", "ROLLING_OVER"] as const;
 export const DISCOVERY_STATUSES = ["NEW", "ACCEPTED", "REJECTED", "IGNORED"] as const;
+export const VERDICT_STANCES = ["RESEARCH_NOW", "WATCH", "DEFER", "AVOID"] as const;
 
 export const LOOKBACKS = ["24h", "7d", "30d", "90d", "6m", "ytd"] as const;
 export const FINANCIAL_WINDOWS = ["last_6_quarters", "last_8_quarters", "ttm"] as const;

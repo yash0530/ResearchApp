@@ -11,10 +11,30 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureMarketData, validateSymbol } from "@/lib/market";
+import { refreshSp500 } from "@/lib/finance-client";
 import { buildLocalContext, renderPrompt, type BuilderValues, type LocalContextTicker } from "@/lib/prompt-renderer";
 import { getLaunchPlan } from "@/lib/launch";
 import { parseSignalDeskBlock, cleanTicker } from "@/lib/parser";
 import { HORIZONS, FINANCIAL_WINDOWS, LOOKBACKS, SOURCE_APPS } from "@/lib/enums";
+
+/**
+ * Force-refresh market data for the given symbols.
+ * Optionally triggers an S&P 500 snapshot refresh on the finance server first.
+ * Resilient — never throws even if the finance server is down; the Yahoo fallback runs instead.
+ */
+export async function refreshTickerDataAction(symbols: string[]): Promise<void> {
+  // Best-effort: refresh the finance server's S&P 500 snapshot.
+  // We don't await the result or let it block; a failed refresh just means
+  // we'll use whatever data is already cached on the finance side.
+  await refreshSp500().catch(() => {});
+
+  // Force-refresh market data for each symbol (bypasses TTL checks).
+  await ensureMarketData(symbols, { force: true });
+
+  revalidatePath("/");
+  revalidatePath("/builder");
+  revalidatePath("/tickers");
+}
 
 const builderSchema = z.object({
   sourceApp: z.enum(SOURCE_APPS),
@@ -116,6 +136,7 @@ export async function saveResearchOutputAction(input: z.infer<typeof researchOut
           sourceApp: values.sourceApp as SourceApp,
           parseStatus,
           parseError: parsed.ignoredLines.length ? `${parsed.ignoredLines.length} ignored line(s)` : null,
+          ignoredLines: JSON.stringify(parsed.ignoredLines),
         },
       })
     : await prisma.researchEntry.create({
@@ -128,6 +149,7 @@ export async function saveResearchOutputAction(input: z.infer<typeof researchOut
           sourceApp: values.sourceApp as SourceApp,
           parseStatus,
           parseError: parsed.ignoredLines.length ? `${parsed.ignoredLines.length} ignored line(s)` : null,
+          ignoredLines: JSON.stringify(parsed.ignoredLines),
         },
       });
 
@@ -161,6 +183,8 @@ async function replaceParsedRows(entryId: string, parsed: ReturnType<typeof pars
     prisma.parsedAnalystTarget.deleteMany({ where: { entryId } }),
     prisma.parsedThemeSignal.deleteMany({ where: { entryId } }),
     prisma.parsedWatchItem.deleteMany({ where: { entryId } }),
+    prisma.parsedVerdict.deleteMany({ where: { entryId } }),
+    prisma.parsedQuestion.deleteMany({ where: { entryId } }),
   ]);
 
   await prisma.$transaction([
@@ -171,6 +195,8 @@ async function replaceParsedRows(entryId: string, parsed: ReturnType<typeof pars
     ...parsed.analystTargets.map((item) => prisma.parsedAnalystTarget.create({ data: { entryId, ...item } })),
     ...parsed.themeSignals.map((item) => prisma.parsedThemeSignal.create({ data: { entryId, ...item } })),
     ...parsed.watchItems.map((item) => prisma.parsedWatchItem.create({ data: { entryId, ...item } })),
+    ...parsed.verdicts.map((item) => prisma.parsedVerdict.create({ data: { entryId, ...item } })),
+    ...parsed.questions.map((item) => prisma.parsedQuestion.create({ data: { entryId, ...item } })),
   ]);
 
   const candidates = new Map<string, { symbol: string; sourceLine: string; companyName?: string; suggestedTheme?: string }>();
@@ -267,6 +293,13 @@ export async function upsertPromptAction(input: z.infer<typeof promptSchema>) {
 
 export async function togglePromptFavoriteAction(id: string, isFavorite: boolean) {
   await prisma.promptTemplate.update({ where: { id }, data: { isFavorite } });
+  revalidatePath("/");
+  revalidatePath("/prompts");
+  revalidatePath("/builder");
+}
+
+export async function togglePromptArchivedAction(id: string, isArchived: boolean) {
+  await prisma.promptTemplate.update({ where: { id }, data: { isArchived } });
   revalidatePath("/");
   revalidatePath("/prompts");
   revalidatePath("/builder");

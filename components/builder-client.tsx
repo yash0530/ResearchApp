@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { Copy, ExternalLink, RefreshCw } from "lucide-react";
-import { createRenderedRunAction, markRunLaunchedAction } from "@/app/actions";
+import Link from "next/link";
+import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { createRenderedRunAction, markRunLaunchedAction, saveResearchOutputAction, refreshTickerDataAction } from "@/app/actions";
 import { FINANCIAL_WINDOWS, HORIZONS, LOOKBACKS, SOURCE_APP_LABELS, SOURCE_APPS, prettifyEnum } from "@/lib/enums";
+import { parseSignalDeskBlock } from "@/lib/parser";
 import type { LaunchPlan } from "@/lib/launch";
 
 const MAX_TICKERS = 12;
@@ -71,6 +73,23 @@ export function BuilderClient({
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  // Step tracker state
+  const [launched, setLaunched] = useState(false);
+
+  // Capture box state
+  const [captureTitle, setCaptureTitle] = useState("");
+  const [captureOutput, setCaptureOutput] = useState("");
+  const [captureSummary, setCaptureSummary] = useState("");
+  const [captureNotes, setCaptureNotes] = useState("");
+  const [isSaving, startSaveTransition] = useTransition();
+  const [saveResult, setSaveResult] = useState<{ entryId: string; parseStatus: string; ignoredCount: number } | null>(null);
+  const [saveError, setSaveError] = useState("");
+  const [ignoredExpanded, setIgnoredExpanded] = useState(false);
+
+  // Refresh ticker state
+  const [isRefreshing, startRefreshTransition] = useTransition();
+  const [refreshMessage, setRefreshMessage] = useState("");
+
   const selectedPrompt = prompts.find((prompt) => prompt.id === promptTemplateId);
   const selectedThemes = useMemo(
     () => themes.filter((theme) => themeSlugs.includes(theme.slug)),
@@ -119,6 +138,12 @@ export function BuilderClient({
     });
   }, [financialWindow, horizon, lookback, researchType, selectedPrompt, selectedThemes, selectedTickerRows]);
 
+  // Live parse preview — computed on every keystroke, no debounce needed for pure fn
+  const liveParsed = useMemo(() => {
+    if (!captureOutput.trim()) return null;
+    return parseSignalDeskBlock(captureOutput);
+  }, [captureOutput]);
+
   function toggleTheme(slug: string) {
     setThemeSlugs((current) =>
       current.includes(slug)
@@ -145,6 +170,10 @@ export function BuilderClient({
 
   function renderRun() {
     setMessage("");
+    // Reset launch/capture state when a new run is created
+    setLaunched(false);
+    setSaveResult(null);
+    setSaveError("");
     startTransition(async () => {
       try {
         const result = await createRenderedRunAction({
@@ -159,6 +188,10 @@ export function BuilderClient({
         });
         setRendered({ ...result, signature: builderSignature });
         setMessage("Run created with refreshed local context.");
+        // Pre-fill title with prompt title + today's date
+        const today = new Date().toISOString().slice(0, 10);
+        const promptTitle = prompts.find((p) => p.id === promptTemplateId)?.title ?? "Research";
+        setCaptureTitle(`${promptTitle} — ${today}`);
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Could not create run.");
       }
@@ -170,7 +203,7 @@ export function BuilderClient({
     try {
       await navigator.clipboard.writeText(activeRendered.renderedPrompt);
       const { url, mode } = activeRendered.launchPlan;
-      const launched = Boolean(url);
+      const didLaunch = Boolean(url);
       if (url) {
         if (url.startsWith("claude://")) {
           window.location.href = url;
@@ -178,12 +211,67 @@ export function BuilderClient({
           window.open(url, "_blank", "noopener,noreferrer");
         }
       }
-      await markRunLaunchedAction(activeRendered.runId, launched);
+      await markRunLaunchedAction(activeRendered.runId, didLaunch);
+      setLaunched(true);
+      setSaveResult(null);
+      setSaveError("");
       setMessage(mode === "copy_only" ? "Prompt copied." : "Prompt copied and app opened.");
     } catch {
       setMessage("Browser clipboard access failed. Select the rendered prompt text and copy it manually, then open the target app.");
     }
   }
+
+  function saveOutput() {
+    if (!captureTitle.trim() || !captureOutput.trim()) return;
+    setSaveError("");
+    setSaveResult(null);
+    startSaveTransition(async () => {
+      try {
+        const result = await saveResearchOutputAction({
+          runId: activeRendered?.runId,
+          title: captureTitle,
+          rawOutput: captureOutput,
+          summary: captureSummary || undefined,
+          notes: captureNotes || undefined,
+          sourceApp: sourceApp as Parameters<typeof saveResearchOutputAction>[0]["sourceApp"],
+        });
+        setSaveResult(result);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not save output.");
+      }
+    });
+  }
+
+  function refreshTickerData() {
+    if (!selectedTickers.length) return;
+    setRefreshMessage("");
+    startRefreshTransition(async () => {
+      try {
+        await refreshTickerDataAction(selectedTickers);
+        setRefreshMessage("Market data refreshed.");
+      } catch (error) {
+        setRefreshMessage(error instanceof Error ? error.message : "Refresh failed.");
+      }
+    });
+  }
+
+  // Step tracker helpers
+  const step1Done = Boolean(activeRendered);
+  const step2Done = launched;
+  const appLabel = SOURCE_APP_LABELS[sourceApp as keyof typeof SOURCE_APP_LABELS] ?? sourceApp;
+
+  // Guidance text after copy
+  const guidanceText = useMemo(() => {
+    if (!activeRendered || !launched) return null;
+    const mode = activeRendered.launchPlan.mode;
+    if (mode === "open_and_copy") {
+      return `Prompt is on your clipboard — paste it into ${appLabel}, run it, then copy the full answer (including the SIGNAL_DESK block) back here.`;
+    }
+    if (mode === "prefill_url") {
+      return `Prompt was pre-filled in ${appLabel} — run it, then copy the full answer back here.`;
+    }
+    return "Prompt copied — run it wherever you like, then paste the answer back.";
+  }, [activeRendered, launched, appLabel]);
 
   return (
     <div className="grid gap-4 xl:grid-cols-[460px_1fr]">
@@ -239,24 +327,26 @@ export function BuilderClient({
               <span className="label mb-0">Themes</span>
               <span className="text-xs text-[var(--muted)]">{themeSlugs.length || "All"} active</span>
             </div>
-            <div className="grid max-h-64 gap-2 overflow-y-auto pr-1">
+            <div className="grid max-h-48 gap-1 overflow-y-auto pr-1">
               {themes.map((theme) => {
                 const checked = themeSlugs.includes(theme.slug);
                 return (
                   <label
                     key={theme.slug}
-                    className={`flex cursor-pointer items-center gap-3 rounded-md border p-3 transition ${
+                    className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 transition ${
                       checked ? "border-[var(--text)] bg-[var(--soft)]" : "border-[var(--border)] bg-[var(--bg)]"
                     }`}
                   >
                     <input
                       type="checkbox"
+                      className="sr-only"
                       checked={checked}
                       onChange={() => toggleTheme(theme.slug)}
                     />
-                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: theme.color }} />
-                    <span className="min-w-0 flex-1 text-sm font-medium">{theme.name}</span>
-                    <span className="badge">{theme.tickers.length}</span>
+                    <CheckboxMark checked={checked} />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: theme.color }} />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{theme.name}</span>
+                    <span className="badge px-1.5 py-0 text-[0.68rem]">{theme.tickers.length}</span>
                   </label>
                 );
               })}
@@ -273,10 +363,26 @@ export function BuilderClient({
                 <button className="btn px-2 py-1 text-xs" type="button" onClick={clearTickers}>
                   Clear
                 </button>
+                <button
+                  className="btn px-2 py-1 text-xs"
+                  type="button"
+                  disabled={isRefreshing || !selectedTickers.length}
+                  onClick={refreshTickerData}
+                  title="Re-fetch grounded market data for selected tickers"
+                >
+                  <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+                  {isRefreshing ? "Refreshing…" : "Refresh data"}
+                </button>
               </div>
             </div>
 
-            <div className="max-h-80 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] p-2">
+            {refreshMessage && (
+              <div className="mb-2 rounded-md border border-[var(--border)] bg-[var(--soft)] px-3 py-2 text-xs text-[var(--muted)]">
+                {refreshMessage}
+              </div>
+            )}
+
+            <div className="max-h-72 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] p-1">
               <div className="grid gap-1">
                 {visibleTickers.map((ticker) => {
                   const checked = selectedTickers.includes(ticker.symbol);
@@ -284,18 +390,19 @@ export function BuilderClient({
                   return (
                     <label
                       key={ticker.symbol}
-                      className={`flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 transition ${
+                      className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition ${
                         checked ? "bg-[var(--soft)]" : "hover:bg-[var(--soft)]"
                       } ${disabled ? "opacity-50" : ""}`}
                     >
                       <input
                         type="checkbox"
-                        className="mt-1"
+                        className="sr-only"
                         checked={checked}
                         disabled={disabled}
                         onChange={() => toggleTicker(ticker.symbol)}
                       />
-                      <span className="min-w-0 flex-1">
+                      <CheckboxMark checked={checked} disabled={disabled} />
+                      <span className="min-w-0 flex-1 truncate">
                         <span className="font-mono text-sm font-semibold">{ticker.symbol}</span>
                         {ticker.companyName && <span className="text-sm text-[var(--muted)]"> · {ticker.companyName}</span>}
                         {ticker.dataStatus === "UNVERIFIED" && <span className="text-xs text-[var(--bad)]"> · unverified</span>}
@@ -373,8 +480,9 @@ export function BuilderClient({
         </div>
       </section>
 
-      <section className="panel panel-pad">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <section className="panel panel-pad flex flex-col gap-5" style={{ minHeight: "calc(100vh - 260px)" }}>
+        {/* Header + launch button */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold">Live Prompt Preview</h2>
@@ -390,15 +498,218 @@ export function BuilderClient({
           </button>
         </div>
 
+        {/* Step tracker */}
+        <StepTracker step1Done={step1Done} step2Done={step2Done} appLabel={appLabel} />
+
+        {/* Guidance text */}
+        {guidanceText && (
+          <div className="rounded-md border border-[var(--border)] bg-[var(--soft)] px-4 py-3 text-sm leading-6 text-[var(--muted)]">
+            {guidanceText}
+          </div>
+        )}
+
+        {/* Prompt preview textarea */}
         <textarea
-          className="textarea min-h-[760px] text-sm leading-7 xl:min-h-[calc(100vh-310px)]"
+          className="textarea flex-1 text-sm leading-7"
+          style={{ minHeight: "200px" }}
           value={activeRendered?.renderedPrompt || livePreview}
           readOnly
         />
+
+        {/* Capture box — visible once a run exists (always shown but disabled until run ready) */}
+        <div className={`space-y-4 rounded-md border border-[var(--border)] p-4 ${!activeRendered ? "opacity-50" : ""}`}>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-semibold">Paste output</h3>
+            {!activeRendered && <span className="text-xs text-[var(--muted)]">Create a run first</span>}
+          </div>
+
+          <Field label="Title">
+            <input
+              className="input"
+              value={captureTitle}
+              onChange={(e) => setCaptureTitle(e.target.value)}
+              disabled={!activeRendered}
+              placeholder="e.g. Memory storage dashboard — 2026-05-31"
+            />
+          </Field>
+
+          <div>
+            <span className="label">Answer from {appLabel}</span>
+            <textarea
+              className="textarea text-sm leading-7"
+              style={{ minHeight: "180px" }}
+              value={captureOutput}
+              onChange={(e) => setCaptureOutput(e.target.value)}
+              disabled={!activeRendered}
+              placeholder={`Paste the full answer from ${appLabel} here, including the SIGNAL_DESK_DATA_START … SIGNAL_DESK_DATA_END block.`}
+            />
+          </div>
+
+          {/* Live parse tally */}
+          {liveParsed && (
+            <ParseTally parsed={liveParsed} expanded={ignoredExpanded} onToggleExpanded={() => setIgnoredExpanded((v) => !v)} />
+          )}
+
+          <Field label="Summary (optional)">
+            <input
+              className="input"
+              value={captureSummary}
+              onChange={(e) => setCaptureSummary(e.target.value)}
+              disabled={!activeRendered}
+              placeholder="One-line takeaway"
+            />
+          </Field>
+
+          <Field label="Notes (optional)">
+            <textarea
+              className="textarea text-sm"
+              style={{ minHeight: "72px" }}
+              value={captureNotes}
+              onChange={(e) => setCaptureNotes(e.target.value)}
+              disabled={!activeRendered}
+              placeholder="Follow-up actions, caveats, etc."
+            />
+          </Field>
+
+          <button
+            className="btn btn-primary w-full"
+            onClick={saveOutput}
+            disabled={isSaving || !activeRendered || !captureTitle.trim() || !captureOutput.trim()}
+          >
+            <Save size={16} />
+            {isSaving ? "Saving…" : "Save & parse"}
+          </button>
+
+          {saveError && (
+            <div className="rounded-md border border-[var(--border)] bg-[var(--soft)] p-3 text-sm text-[var(--bad)]">
+              {saveError}
+            </div>
+          )}
+
+          {saveResult && (
+            <div className="rounded-md border border-[var(--border)] bg-[var(--soft)] p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Check size={14} className="text-[var(--good,#16a34a)]" />
+                <span>
+                  Saved.{" "}
+                  <Link href={`/research/${saveResult.entryId}`} className="underline underline-offset-2">
+                    View entry
+                  </Link>
+                </span>
+                <span className="badge">{saveResult.parseStatus === "PARSED" ? "Parsed" : "No block"}</span>
+                {saveResult.ignoredCount > 0 && (
+                  <span className="badge text-[var(--bad)]">{saveResult.ignoredCount} ignored line{saveResult.ignoredCount !== 1 ? "s" : ""}</span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );
 }
+
+// ─── Step tracker ────────────────────────────────────────────────────────────
+
+function StepTracker({ step1Done, step2Done, appLabel }: { step1Done: boolean; step2Done: boolean; appLabel: string }) {
+  const steps = [
+    { label: "Create run", done: step1Done, active: !step1Done },
+    { label: `Copy & open ${appLabel}`, done: step2Done, active: step1Done && !step2Done },
+    { label: `Run it in ${appLabel}`, done: false, active: step2Done },
+    { label: "Paste the answer back", done: false, active: step2Done },
+  ];
+
+  return (
+    <ol className="flex flex-wrap items-center gap-1.5 text-xs">
+      {steps.map((step, i) => (
+        <li key={i} className="flex items-center gap-1.5">
+          {i > 0 && <span className="text-[var(--muted)]">→</span>}
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium transition ${
+              step.done
+                ? "bg-[var(--accent)] text-[var(--bg)]"
+                : step.active
+                  ? "border border-[var(--accent)] text-[var(--accent)]"
+                  : "border border-[var(--border)] text-[var(--muted)]"
+            }`}
+          >
+            {step.done && <Check size={10} strokeWidth={3} />}
+            {i + 1}. {step.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// ─── Live parse tally ────────────────────────────────────────────────────────
+
+function ParseTally({
+  parsed,
+  expanded,
+  onToggleExpanded,
+}: {
+  parsed: ReturnType<typeof parseSignalDeskBlock>;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  const { claims, risks, catalysts, tickerMentions, analystTargets, themeSignals, watchItems, verdicts, discoveries, questions, lineCount, ignoredLines } = parsed;
+
+  if (lineCount === 0) {
+    return (
+      <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+        No SIGNAL_DESK block detected yet.
+      </div>
+    );
+  }
+
+  const parts: string[] = [];
+  if (claims.length) parts.push(`${claims.length} claim${claims.length !== 1 ? "s" : ""}`);
+  if (risks.length) parts.push(`${risks.length} risk${risks.length !== 1 ? "s" : ""}`);
+  if (catalysts.length) parts.push(`${catalysts.length} catalyst${catalysts.length !== 1 ? "s" : ""}`);
+  if (tickerMentions.length) parts.push(`${tickerMentions.length} ticker${tickerMentions.length !== 1 ? "s" : ""}`);
+  if (analystTargets.length) parts.push(`${analystTargets.length} target${analystTargets.length !== 1 ? "s" : ""}`);
+  if (themeSignals.length) parts.push(`${themeSignals.length} theme${themeSignals.length !== 1 ? "s" : ""}`);
+  if (watchItems.length) parts.push(`${watchItems.length} watch${watchItems.length !== 1 ? "es" : ""}`);
+  if (verdicts.length) parts.push(`${verdicts.length} verdict${verdicts.length !== 1 ? "s" : ""}`);
+  if (discoveries.length) parts.push(`${discoveries.length} discover${discoveries.length !== 1 ? "ies" : "y"}`);
+  if (questions.length) parts.push(`${questions.length} question${questions.length !== 1 ? "s" : ""}`);
+
+  return (
+    <div className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Check size={12} className="shrink-0 text-[var(--good,#16a34a)]" />
+        <span className="font-medium text-[var(--good,#16a34a)]">
+          {parts.length ? parts.join(" · ") : `${lineCount} line${lineCount !== 1 ? "s" : ""} parsed`}
+        </span>
+      </div>
+
+      {ignoredLines.length > 0 && (
+        <div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-[var(--bad)] hover:opacity-80"
+            onClick={onToggleExpanded}
+          >
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            {ignoredLines.length} malformed / ignored line{ignoredLines.length !== 1 ? "s" : ""}
+          </button>
+          {expanded && (
+            <ul className="mt-1.5 space-y-1 pl-3.5">
+              {ignoredLines.map((line, i) => (
+                <li key={i} className="truncate font-mono text-[0.7rem] text-[var(--muted)]" title={line}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -406,6 +717,21 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="label">{label}</span>
       {children}
     </label>
+  );
+}
+
+function CheckboxMark({ checked, disabled = false }: { checked: boolean; disabled?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+        checked
+          ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+          : "border-[var(--border)] bg-[var(--panel)] text-transparent"
+      } ${disabled ? "opacity-60" : ""}`}
+    >
+      <Check size={12} strokeWidth={3} />
+    </span>
   );
 }
 

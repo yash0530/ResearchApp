@@ -49,6 +49,32 @@ export function buildLocalContext(tickers: LocalContextTicker[]) {
   for (const ticker of tickers) {
     const latest = ticker.metricSnapshots[0];
     if (latest) {
+      // Parse spotlightTags — stored as a JSON string array.
+      let spotlightTags: string[] = [];
+      try {
+        const parsed = JSON.parse((latest as Record<string, unknown>).spotlightTags as string ?? "[]");
+        if (Array.isArray(parsed)) {
+          // Sanitize: strip any pipe or newline characters that would break the format.
+          spotlightTags = parsed.map((t: unknown) =>
+            String(t).replace(/[|\n\r]/g, " ").trim(),
+          ).filter(Boolean);
+        }
+      } catch {
+        // ignore malformed JSON
+      }
+
+      // forward_pe_vs_sector_avg: ratio of ticker forwardPe to sector average.
+      const forwardPeSectorAvg = (latest as Record<string, unknown>).forwardPeSectorAvg as number | null | undefined;
+      const forwardPe = latest.forwardPe;
+      const forwardPeVsSectorAvg =
+        forwardPe !== null &&
+        forwardPe !== undefined &&
+        forwardPeSectorAvg !== null &&
+        forwardPeSectorAvg !== undefined &&
+        forwardPeSectorAvg !== 0
+          ? Math.round((forwardPe / forwardPeSectorAvg) * 10000) / 10000
+          : null;
+
       lines.push(
         [
           "LOCAL_TICKER",
@@ -63,6 +89,12 @@ export function buildLocalContext(tickers: LocalContextTicker[]) {
           `forward_pe=${formatMaybe(latest.forwardPe)}`,
           `trailing_pe=${formatMaybe(latest.trailingPe)}`,
           `analyst_mean_target=${formatMaybe(latest.analystMeanTarget)}`,
+          // Finance-grounded fields (emit as "na" when absent).
+          `sector=${sanitizeText((latest as Record<string, unknown>).sector as string | null | undefined) ?? "na"}`,
+          `beta=${formatMaybe((latest as Record<string, unknown>).beta as number | null | undefined)}`,
+          `sector_momentum_pct=${formatMaybe((latest as Record<string, unknown>).sectorMomentumPercentile as number | null | undefined)}`,
+          `forward_pe_vs_sector_avg=${forwardPeVsSectorAvg !== null ? forwardPeVsSectorAvg : "na"}`,
+          `spotlight=${spotlightTags.length > 0 ? spotlightTags.join(",") : "na"}`,
         ].join("|"),
       );
     } else {
@@ -90,4 +122,11 @@ export function buildLocalContext(tickers: LocalContextTicker[]) {
 function formatMaybe(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(value)) return "na";
   return Number(value.toFixed(4)).toString();
+}
+
+/** Strip pipe and newline characters from a string field so it is safe to embed in a pipe-delimited line. */
+function sanitizeText(value: string | null | undefined): string | null {
+  if (!value || typeof value !== "string") return null;
+  const clean = value.replace(/[|\n\r]/g, " ").trim();
+  return clean || null;
 }

@@ -1,5 +1,9 @@
 import YahooFinance from "yahoo-finance2";
 import { prisma } from "./prisma";
+import {
+  getGroundedTicker,
+  getGroundedQuarters,
+} from "./finance-client";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey", "ripHistorical"] });
 
@@ -14,6 +18,17 @@ export type SymbolValidation = {
 };
 
 export async function validateSymbol(symbol: string): Promise<SymbolValidation> {
+  // Try finance company lookup first — faster and grounded.
+  try {
+    const grounded = await getGroundedTicker(symbol);
+    if (grounded && grounded.companyName) {
+      return { symbol, companyName: grounded.companyName, dataStatus: "VERIFIED" };
+    }
+  } catch {
+    // fall through to yahoo
+  }
+
+  // Fallback to yahoo-finance2.
   try {
     const quote = (await yahooFinance.quote(symbol)) as Record<string, unknown>;
     const name = stringValue(quote.shortName) || stringValue(quote.longName);
@@ -27,33 +42,109 @@ export async function validateSymbol(symbol: string): Promise<SymbolValidation> 
   }
 }
 
-export async function ensureMarketData(symbols: string[]) {
-  const unique = Array.from(new Set(symbols.map((s) => s.toUpperCase().trim()).filter(Boolean))).slice(0, 12);
+export async function ensureMarketData(
+  symbols: string[],
+  opts?: { force?: boolean },
+) {
+  const force = opts?.force ?? false;
+  const unique = Array.from(
+    new Set(symbols.map((s) => s.toUpperCase().trim()).filter(Boolean)),
+  ).slice(0, 12);
+
   for (const symbol of unique) {
     const ticker = await prisma.ticker.findUnique({ where: { symbol } });
     if (!ticker) continue;
 
+    // ── Snapshot ──────────────────────────────────────────────────────────────
     const latestSnapshot = await prisma.tickerMetricSnapshot.findFirst({
       where: { tickerId: ticker.id },
       orderBy: { asOf: "desc" },
     });
     const snapshotFresh =
-      latestSnapshot && Date.now() - latestSnapshot.asOf.getTime() < Math.min(QUOTE_TTL_MS, FUNDAMENTAL_TTL_MS);
+      !force &&
+      latestSnapshot &&
+      Date.now() - latestSnapshot.asOf.getTime() <
+        Math.min(QUOTE_TTL_MS, FUNDAMENTAL_TTL_MS);
 
     if (!snapshotFresh) {
-      await refreshMetricSnapshot(ticker.id, symbol);
+      // Try finance first; fall back to Yahoo.
+      const groundedTicker = await getGroundedTicker(symbol);
+      if (groundedTicker) {
+        await prisma.tickerMetricSnapshot.create({
+          data: {
+            tickerId: ticker.id,
+            symbol,
+            price: groundedTicker.price,
+            marketCap: groundedTicker.marketCap,
+            forwardPe: groundedTicker.forwardPe,
+            trailingPe: groundedTicker.trailingPe,
+            oneYearReturnPct: groundedTicker.yearChangePct,
+            sector: groundedTicker.sector,
+            beta: groundedTicker.beta,
+            sectorMomentumPercentile: groundedTicker.sectorMomentumPercentile,
+            forwardPeSectorAvg: groundedTicker.forwardPeSectorAvg,
+            spotlightTags: JSON.stringify(groundedTicker.spotlightTags),
+            dataSource: "finance",
+          },
+        });
+      } else {
+        // Yahoo fallback.
+        await refreshMetricSnapshot(ticker.id, symbol);
+      }
     }
 
+    // ── Financial Quarters ────────────────────────────────────────────────────
     const latestQuarter = await prisma.financialQuarter.findFirst({
       where: { tickerId: ticker.id },
       orderBy: { asOf: "desc" },
     });
-    const quartersFresh = latestQuarter && Date.now() - latestQuarter.asOf.getTime() < QUARTER_TTL_MS;
+    const quartersFresh =
+      !force &&
+      latestQuarter &&
+      Date.now() - latestQuarter.asOf.getTime() < QUARTER_TTL_MS;
+
     if (!quartersFresh) {
-      await refreshFinancialQuarters(ticker.id, symbol);
+      // Try finance first; fall back to Yahoo.
+      const groundedQuarters = await getGroundedQuarters(symbol);
+      if (groundedQuarters && groundedQuarters.length > 0) {
+        for (const q of groundedQuarters) {
+          await prisma.financialQuarter.upsert({
+            where: { tickerId_quarter: { tickerId: ticker.id, quarter: q.quarter } },
+            create: {
+              tickerId: ticker.id,
+              symbol,
+              quarter: q.quarter,
+              periodEnd: q.periodEnd,
+              revenue: q.revenue,
+              grossProfit: q.grossProfit,
+              operatingIncome: q.operatingIncome,
+              netIncome: q.netIncome,
+              grossMargin: q.grossMargin,
+              fcf: q.fcf,
+              capex: q.capex,
+            },
+            update: {
+              periodEnd: q.periodEnd,
+              revenue: q.revenue,
+              grossProfit: q.grossProfit,
+              operatingIncome: q.operatingIncome,
+              netIncome: q.netIncome,
+              grossMargin: q.grossMargin,
+              fcf: q.fcf,
+              capex: q.capex,
+              asOf: new Date(),
+            },
+          });
+        }
+      } else {
+        // Yahoo fallback.
+        await refreshFinancialQuarters(ticker.id, symbol);
+      }
     }
   }
 }
+
+// ── Yahoo-only paths (kept intact as fallbacks) ──────────────────────────────
 
 async function refreshMetricSnapshot(tickerId: string, symbol: string) {
   try {
@@ -92,6 +183,7 @@ async function refreshMetricSnapshot(tickerId: string, symbol: string) {
         threeMonthReturnPct: returns.threeMonth,
         sixMonthReturnPct: returns.sixMonth,
         oneYearReturnPct: returns.oneYear,
+        dataSource: "yahoo",
       },
     });
   } catch {
@@ -193,7 +285,7 @@ async function safeHistory(symbol: string) {
   }
 }
 
-function calculateReturns(history: Array<Record<string, unknown>>, currentPrice?: number | null) {
+export function calculateReturns(history: Array<Record<string, unknown>>, currentPrice?: number | null) {
   const latest = currentPrice ?? numberValue(history.at(-1)?.close);
   if (!latest || !history.length) {
     return { ytd: null, oneMonth: null, threeMonth: null, sixMonth: null, oneYear: null };

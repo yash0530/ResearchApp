@@ -7,6 +7,7 @@ import {
   deletePromptAction,
   duplicatePromptAction,
   togglePromptFavoriteAction,
+  togglePromptArchivedAction,
   upsertPromptAction,
 } from "@/app/actions";
 import { CADENCES, prettifyEnum } from "@/lib/enums";
@@ -21,6 +22,7 @@ type PromptRow = {
   cadence: string;
   tags: string;
   isFavorite: boolean;
+  isArchived: boolean;
 };
 
 const emptyPrompt = {
@@ -32,9 +34,15 @@ const emptyPrompt = {
   cadence: "AD_HOC",
   tags: "",
   isFavorite: false,
+  isArchived: false,
 };
 
 export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const visiblePrompts = useMemo(() => {
+    return prompts.filter((p) => showArchived || !p.isArchived);
+  }, [prompts, showArchived]);
+
   const [selectedId, setSelectedId] = useState(prompts[0]?.id ?? "");
   const selected = useMemo(() => prompts.find((prompt) => prompt.id === selectedId), [prompts, selectedId]);
   const [draft, setDraft] = useState<PromptRow>(selected ? hydrate(selected) : emptyPrompt);
@@ -86,29 +94,42 @@ export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
       <section className="panel panel-pad">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Prompt Library</h2>
-            <p className="text-sm text-[var(--muted)]">{prompts.length} templates</p>
+        <div className="mb-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Prompt Library</h2>
+              <p className="text-sm text-[var(--muted)]">{visiblePrompts.length} templates</p>
+            </div>
+            <button className="btn" onClick={() => { setSelectedId(""); setDraft(emptyPrompt); }}>
+              New
+            </button>
           </div>
-          <button className="btn" onClick={() => { setSelectedId(""); setDraft(emptyPrompt); }}>
-            New
-          </button>
+          <label className="flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+            />
+            Show Archived
+          </label>
         </div>
         <div className="space-y-2">
-          {prompts.map((prompt) => (
+          {visiblePrompts.map((prompt) => (
             <button
               key={prompt.id}
               className={`w-full rounded-md border p-3 text-left transition ${
                 prompt.id === selectedId ? "border-[var(--text)] bg-[var(--soft)]" : "border-[var(--border)]"
-              }`}
+              } ${prompt.isArchived ? "opacity-60 italic" : ""}`}
               onClick={() => selectPrompt(prompt.id)}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{prompt.title}</span>
                 {prompt.isFavorite && <Star size={14} className="fill-current" />}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">{prettifyEnum(prompt.cadence)}</div>
+              <div className="mt-1 flex items-center justify-between text-xs text-[var(--muted)]">
+                <span>{prettifyEnum(prompt.cadence)}</span>
+                {prompt.isArchived && <span className="badge text-[10px]">Archived</span>}
+              </div>
             </button>
           ))}
         </div>
@@ -134,6 +155,9 @@ export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
                 </button>
                 <button className="btn" onClick={() => togglePromptFavoriteAction(draft.id, !draft.isFavorite)}>
                   <Star size={15} /> {draft.isFavorite ? "Unfavorite" : "Favorite"}
+                </button>
+                <button className="btn" onClick={() => togglePromptArchivedAction(draft.id, !draft.isArchived)}>
+                  {draft.isArchived ? "Unarchive" : "Archive"}
                 </button>
                 <button className="btn btn-danger" onClick={() => remove(draft.id)}>
                   <Trash2 size={15} /> Delete

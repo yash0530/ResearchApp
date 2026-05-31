@@ -89,6 +89,7 @@ async function main() {
         sourceAppHints: JSON.stringify(prompt.sourceAppHints),
         variableSchema: JSON.stringify(defaultVariableSchema()),
         isFavorite: prompt.isFavorite ?? false,
+        isArchived: prompt.isArchived ?? false,
       },
       create: {
         title: prompt.title,
@@ -100,6 +101,7 @@ async function main() {
         sourceAppHints: JSON.stringify(prompt.sourceAppHints),
         variableSchema: JSON.stringify(defaultVariableSchema()),
         isFavorite: prompt.isFavorite ?? false,
+        isArchived: prompt.isArchived ?? false,
       },
     });
   }

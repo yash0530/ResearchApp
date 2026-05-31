@@ -8,10 +8,93 @@ type PromptSeed = {
   tags: string[];
   sourceAppHints: SourceApp[];
   isFavorite?: boolean;
+  isArchived?: boolean;
   body: string;
 };
 
-const PARSE_CONTRACT = `
+const PARSE_CONTRACT = `Write the full readable human report first. The machine parse block goes at the very end of your response — nothing may appear after the closing data marker.
+
+Parse block rules:
+- Wrap all data lines in exactly one SIGNAL_DESK_DATA_START / SIGNAL_DESK_DATA_END pair; your response must end the moment the closing marker appears.
+- The human-readable report must precede the data block entirely — never interleave prose and data lines.
+- Use only: THEME, TICKER, CLAIM, RISK, CATALYST, TARGET, WATCH, VERDICT, DISCOVERY_TICKER, QUESTION.
+- Format every machine-readable line as TYPE|key=value|key=value.
+- Do not use pipe characters inside values. Omit any unknown fields.
+- confidence and priority must be integers 1-5.
+- importance, severity, and crowding must be exactly: low, medium, or high.
+- cycle must be exactly: dormant, emerging, heating_up, crowded, or rolling_over.
+- stance must be exactly: RESEARCH_NOW, WATCH, DEFER, or AVOID.
+- sentiment must be exactly: bullish, neutral, bearish, or mixed.
+- Emit a DISCOVERY_TICKER line for every ticker you mention that is NOT in my selected ticker list, no exceptions.
+
+Required example (copy this exact structure):
+SIGNAL_DESK_DATA_START
+THEME|theme=memory_storage|cycle=heating_up|crowding=high|confidence=4|summary=HBM tightness persists into next quarter
+TICKER|ticker=MU|theme=memory_storage|sentiment=bullish|confidence=4|role=HBM beneficiary
+CLAIM|text=HBM demand is supply constrained through next reported quarter|ticker=MU|theme=memory_storage|confidence=4|importance=high
+RISK|text=DRAM pricing rolls over faster than expected|ticker=MU|theme=memory_storage|severity=high|timeframe=next_quarter
+CATALYST|text=Management raises HBM revenue guide|ticker=MU|theme=memory_storage|importance=medium|timeframe=next_quarter
+TARGET|ticker=MU|firm=UBS|rating=buy|target=155|previous_target=140|date=2026-05-20
+WATCH|text=Gross margin trajectory versus prior guide|ticker=MU|theme=memory_storage|timeframe=next_2_quarters
+VERDICT|ticker=MU|theme=memory_storage|stance=RESEARCH_NOW|priority=4|horizon=next_12_months|rationale=Structural HBM demand with near-term supply tightness supports price
+DISCOVERY_TICKER|ticker=ALAB|company=Astera Labs|theme=networking_optics_interconnect|reason=CXL and connectivity exposure adds second-derivative upside
+QUESTION|text=Is this thesis too dependent on one hyperscaler capex cycle?|ticker=MU|theme=memory_storage
+SIGNAL_DESK_DATA_END`;
+
+function promptV2({
+  title,
+  role,
+  task,
+  tableColumns,
+  bullets,
+}: {
+  title: string;
+  role: string;
+  task: string;
+  tableColumns: string[];
+  bullets: string[];
+}) {
+  return `# ${title}
+
+You are my AI infrastructure investing research analyst.
+
+My investment focus:
+- Public-market AI infrastructure: chips, memory, optics, networking, power, cooling, data centers, robotics, drones, and adjacent second-order beneficiaries.
+- I am already highly exposed to memory names (Micron / DRAM / SanDisk); do not merely confirm my current book — actively challenge concentration risk.
+
+Role: ${role}
+
+Task:
+${task}
+
+Inputs:
+- Themes: {{themes}}
+- Tickers: {{tickers}}
+- Lookback: {{lookback}}
+- Financial Window: {{financial_window}}
+- Horizon: {{horizon}}
+- Local Context: {{local_context}}
+
+Local Context baseline instruction:
+Use the Local Context block above as your numeric and narrative baseline. Do NOT merely restate it — update and extend it with fresh findings from your research. Highlight specifically what changed versus the cached baseline.
+
+Quality rules:
+- Be factual, sourced, skeptical, and specific. Cite dates for recent events, target changes, and earnings references.
+- Separate what is proven in numbers from what is only narrative.
+- Distinguish current-consensus trades from emerging second-derivative trades.
+- Include disconfirming evidence for every major bullish claim.
+- Call out stale, low-quality, or circular sources.
+- Prefer public equities, ADRs, and ETFs over private or speculative names.
+- Do not write generic "AI is growing" filler. Every claim needs a specific number, date, or sourced event.
+
+Requirements:
+1. Markdown table with columns: ${tableColumns.join(" | ")}.
+${bullets.map((b) => `- ${b}`).join("\n")}
+
+${PARSE_CONTRACT}`;
+}
+
+const OLD_PARSE_CONTRACT = `
 After the readable report, end with a strict parse block for Signal Desk.
 
 Parse block rules:
@@ -37,7 +120,7 @@ DISCOVERY_TICKER|ticker=ALAB|company=Astera Labs|theme=networking_optics_interco
 QUESTION|text=Is this thesis too dependent on one hyperscaler capex cycle?|ticker=MU|theme=memory_storage
 SIGNAL_DESK_DATA_END`;
 
-function prompt({
+function oldPrompt({
   title,
   role,
   task,
@@ -94,10 +177,150 @@ Quality rules:
 - Do not give generic "AI is growing" commentary.
 ${extra}
 
-${PARSE_CONTRACT}`;
+${OLD_PARSE_CONTRACT}`;
 }
 
 export const PROMPT_SEEDS: PromptSeed[] = [
+  // 6 Active v2 Prompts
+  {
+    title: "Daily Signal Triage",
+    slug: "daily-signal-triage",
+    description: "Morning triage of market signal, lookback news, and baseline comparison.",
+    cadence: "DAILY",
+    tags: ["daily", "triage", "signals"],
+    sourceAppHints: ["PERPLEXITY", "CLAUDE"],
+    isFavorite: true,
+    isArchived: false,
+    body: promptV2({
+      title: "Daily Signal Triage",
+      role: "Morning desk analyst who compresses AI infrastructure signal from the lookback window into an investable dashboard, with blunt stance calls and explicit comparison to the cached Local Context baseline.",
+      task: "Scan the selected themes and tickers for what changed, what matters, and what deserves study today. Use the Local Context as a numeric baseline — call out exactly what moved versus that baseline. Flag any new analyst target changes, earnings references, or macro regime shifts with their dates.",
+      tableColumns: ["Ticker", "What Changed vs Baseline", "Stance", "Priority (1-5)", "Horizon", "Rationale"],
+      bullets: [
+        "Open with up to 5 tight bullets on the highest-signal data shifts — each bullet must cite a specific date, number, or sourced event.",
+        "Identify near-term macro or micro catalysts with specific expected dates or triggers.",
+        "List up to 3 disconfirming signals that challenge the current baseline.",
+        "Identify any tickers newly entering or exiting the conversation — emit DISCOVERY_TICKER for anything not in my list.",
+        "Strictly avoid long-form prose introductions or generic AI commentary.",
+      ],
+    }),
+  },
+  {
+    title: "Theme / Bottleneck Monitor",
+    slug: "theme-bottleneck-monitor",
+    description: "Monitor key bottlenecks, cycle stages, and hardware value-chain shifts.",
+    cadence: "WEEKLY",
+    tags: ["themes", "bottlenecks", "monitor"],
+    sourceAppHints: ["PERPLEXITY", "GEMINI"],
+    isArchived: false,
+    body: promptV2({
+      title: "Theme / Bottleneck Monitor",
+      role: "Sector specialist tracking where capital, capacity, and orders are stacking up in the AI infrastructure value chain — distinguishing bottlenecks with real revenue proof from those still in narrative phase.",
+      task: "For each selected theme, assess cycle stage, crowding, order backlog status, and capacity constraint indicators. Use Local Context cycle and crowding fields as your baseline — update them where fresh data justifies a change, and explain why. Identify which bottlenecks are moving from theory to billed revenue, which are peaking, and which are emerging.",
+      tableColumns: ["Theme", "Cycle Stage", "Crowding", "Revenue Proof", "Bottleneck State", "Key Milestone"],
+      bullets: [
+        "For each theme, cite a specific capacity, backlog, lead-time, or pricing data point with date — no narrative-only claims.",
+        "Distinguish cycle stages with evidence: emerging (early proof), heating_up (demand confirmed, supply lag), crowded (consensus, peak narrative), rolling_over (demand weakness or supply relief emerging).",
+        "Identify one concrete near-term milestone (earnings date, product launch, capacity date) that could reprice each theme.",
+        "List any second-derivative or adjacent themes not in my list that are gaining traction — emit DISCOVERY_TICKER for public names.",
+        "Include disconfirming evidence: which themes could be rolling over despite bullish narrative?",
+      ],
+    }),
+  },
+  {
+    title: "Ticker Battlecard + Valuation Check",
+    slug: "ticker-battlecard-valuation-check",
+    description: "Compare multiple tickers on valuation, fundamentals, and core thesis.",
+    cadence: "AD_HOC",
+    tags: ["tickers", "comparison", "valuation"],
+    sourceAppHints: ["CLAUDE", "CHATGPT"],
+    isArchived: false,
+    body: promptV2({
+      title: "Ticker Battlecard + Valuation Check",
+      role: "Fundamental analyst who refuses to let narrative outrun numbers — comparing selected tickers on revenue proof, margin trajectory, and valuation versus the cached Local Context financial baseline.",
+      task: "For each selected ticker, identify its exact role in the AI infrastructure stack, what percentage of revenue is attributable to AI, whether fundamentals support the narrative, and how current valuation compares to earnings trajectory. Use the Local Context financial fields as your baseline — update any metrics where you have fresher data and flag the discrepancy.",
+      tableColumns: ["Ticker", "Role in Stack", "AI Revenue % (Proven)", "Valuation vs Growth", "Stance", "Priority"],
+      bullets: [
+        "For each ticker, cite a specific revenue figure, margin level, or guidance number with quarter/date — mark clearly if extrapolated versus reported.",
+        "Separate what is proven in reported financials from what is only management commentary or analyst forecast.",
+        "Highlight thesis-killer risks: what would need to be true for the AI revenue narrative to disappoint?",
+        "Rank tickers by risk-adjusted preference for capital allocation and explain the ordering.",
+        "Include at least one disconfirming data point per ticker — a risk, miss, or margin concern grounded in numbers.",
+        "Note any analyst target changes (firm, old target, new target, date) from the lookback window.",
+      ],
+    }),
+  },
+  {
+    title: "Discovery Scout",
+    slug: "discovery-scout",
+    description: "Scan for underfollowed second-derivative names and theme-adjacent players.",
+    cadence: "WEEKLY",
+    tags: ["discovery", "scout", "ideas"],
+    sourceAppHints: ["PERPLEXITY", "GEMINI"],
+    isArchived: false,
+    body: promptV2({
+      title: "Discovery Scout",
+      role: "Contrarian thematic scout surfacing second- and third-derivative AI infrastructure ideas before they enter consensus — with revenue inflection proof, not just narrative potential.",
+      task: "Find public equities, ADRs, or ETFs connected to the selected themes that are NOT the standard GPU/memory consensus trades. Rank ideas by probability of earnings inflection, margin expansion, or narrative re-rating within the horizon. Use Local Context as a baseline to verify what is already tracked — focus only on names that add diversification or a differentiated angle.",
+      tableColumns: ["Ticker", "Proposed Theme", "Inflection Proof", "Crowding State", "Thesis Killer", "Stance"],
+      bullets: [
+        "Focus on names outside the core GPU/memory consensus — do not recycle well-known names unless they have a fresh, non-consensus angle.",
+        "For each idea, cite a specific revenue event, design win, order flow, or product milestone that grounds the thesis — no narrative-only pitches.",
+        "Assess how crowded each idea already is: early/underfollowed, entering consensus, or already crowded.",
+        "State the single most important thesis-killer for each idea.",
+        "Emit a DISCOVERY_TICKER line for every compelling name outside my selected ticker list — this is mandatory.",
+        "Exclude names that are too speculative (no revenue proof), already over-owned, or pure-play AI hype without infrastructure exposure.",
+      ],
+    }),
+  },
+  {
+    title: "Earnings / Event Review",
+    slug: "earnings-event-review",
+    description: "Comprehensive prep and postmortem review of upcoming or completed earnings events.",
+    cadence: "AD_HOC",
+    tags: ["earnings", "events", "review"],
+    sourceAppHints: ["PERPLEXITY", "CLAUDE"],
+    isArchived: false,
+    body: promptV2({
+      title: "Earnings / Event Review",
+      role: "Event analyst who separates permanent thesis changes from one-day price reactions — anchoring analysis on specific reported numbers, guidance revisions, and management quotes with exact dates.",
+      task: "For each selected ticker with an upcoming or recently completed earnings event, identify consensus expectations, key segment metrics, guidance quality, and what specifically changed in the investment thesis. Use Local Context financial metrics as your baseline — note where reported results beat, missed, or confirmed the baseline. For upcoming events, build the guidepost checklist; for completed events, deliver the postmortem.",
+      tableColumns: ["Ticker", "Event Date", "Consensus vs Result", "Beat/Miss (Specific $)", "Thesis Change?", "Stance"],
+      bullets: [
+        "For each ticker, state the exact event date (or expected date), consensus estimate, and reported result with specific dollar or percentage figures.",
+        "Separate what changed in the fundamental thesis from what was temporary price reaction or one-quarter noise.",
+        "Detail management commentary on margins, backlogs, and forward guidance with direct quotes where available.",
+        "List analyst target or rating changes post-event (firm, old target, new target, date).",
+        "For upcoming events: list the 3 most important guideposts (specific metrics, thresholds, or commentary to watch).",
+        "Include at least one disconfirming signal — a miss, guidance cut, or margin compression indicator.",
+      ],
+    }),
+  },
+  {
+    title: "Portfolio Risk + Research Priority",
+    slug: "portfolio-risk-research-priority",
+    description: "Blunt skeptical review prioritizing research next-steps and Debias checks.",
+    cadence: "WEEKLY",
+    tags: ["risk", "debias", "priority"],
+    sourceAppHints: ["CLAUDE", "CHATGPT"],
+    isArchived: false,
+    body: promptV2({
+      title: "Portfolio Risk + Research Priority",
+      role: "Blunt anti-confirmation-bias analyst whose job is NOT to validate current views — challenging concentration risk, cycle assumptions, and narrative crowding with evidence-based skepticism.",
+      task: "Challenge the selected themes and tickers. Find ways the AI infrastructure thesis could be over-owned, cyclically fragile, margin-dilutive, capex constrained, overvalued, or already fully priced. Use Local Context as the baseline to identify where assumptions may have drifted from the data. Recommend specific, actionable research steps to resolve the highest-priority ambiguities.",
+      tableColumns: ["Ticker / Theme", "Concentration Risk", "Thesis Threat (Specific)", "What Would Change My Mind", "Stance", "Priority"],
+      bullets: [
+        "List the 5 most critical thesis threats with specific evidence — each threat must reference a number, date, or sourced concern, not a generic risk.",
+        "Identify where the Local Context baseline may be stale, overly optimistic, or extrapolating narrative beyond reported numbers.",
+        "Propose 3-5 specific, resolvable research questions — questions with a concrete answer path, not open-ended speculation.",
+        "Identify better diversifiers if concentration in memory or any single theme is too high — prefer public equities, ADRs, or ETFs.",
+        "State explicitly: what would need to be true for you to upgrade or downgrade each major position or theme?",
+        "Include at least one scenario where the entire AI infrastructure thesis underperforms for 12+ months and what the early signals would be.",
+      ],
+    }),
+  },
+
+  // 15 Archived old prompts (slugs are preserved and marked isArchived: true)
   {
     title: "Daily AI Infrastructure Dashboard",
     slug: "daily-ai-infrastructure-dashboard",
@@ -105,8 +328,9 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "DAILY",
     tags: ["daily", "dashboard", "ai-infra"],
     sourceAppHints: ["PERPLEXITY", "CLAUDE"],
-    isFavorite: true,
-    body: prompt({
+    isFavorite: false,
+    isArchived: true,
+    body: oldPrompt({
       title: "Daily AI Infrastructure Dashboard",
       role: "Act as a morning desk analyst who compresses the last day/week of AI infrastructure signal into an investable dashboard.",
       task: "Scan the selected themes and tickers for what changed, what matters, and what I should study today. Use the local context as a baseline, then update it with fresh news, analyst notes, earnings references, and market action.",
@@ -120,8 +344,9 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["ideas", "discovery", "underfollowed"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    isFavorite: true,
-    body: prompt({
+    isFavorite: false,
+    isArchived: true,
+    body: oldPrompt({
       title: "New AI Infra Idea Finder",
       role: "Act as a contrarian thematic scout looking for investable AI infrastructure names before they become obvious.",
       task: "Find public names, ADRs, or ETFs connected to the selected AI infrastructure themes that are not the standard GPU/memory consensus trades. Rank ideas by probability of earnings inflection, narrative expansion, market crowding, and relevance over the next 3-12 months.",
@@ -136,7 +361,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["theme", "deep-dive"],
     sourceAppHints: ["CLAUDE", "PERPLEXITY"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Theme Deep Dive",
       role: "Act as a sector specialist covering one AI infrastructure bottleneck.",
       task: "Deeply research the selected theme. Explain the narrative, where the theme is in the market cycle, what changed over the last 90 days, who the arms dealers are, who the speculative hype names are, and what milestones could make the area rerate.",
@@ -150,7 +376,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "AD_HOC",
     tags: ["ticker", "comparison", "battle-card"],
     sourceAppHints: ["CLAUDE", "CHATGPT"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Ticker Battle Card",
       role: "Act as a fundamental analyst comparing multiple AI infrastructure stocks on risk/reward.",
       task: "For each selected ticker, identify its exact role in the AI infrastructure stack, revenue exposure to AI, what is priced in, catalysts, thesis breakers, valuation framing, and whether it is core, satellite, speculative, or avoid.",
@@ -164,8 +391,9 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["memory", "micron", "cycle"],
     sourceAppHints: ["PERPLEXITY", "CLAUDE"],
-    isFavorite: true,
-    body: prompt({
+    isFavorite: false,
+    isArchived: true,
+    body: oldPrompt({
       title: "Micron / Memory Cycle Review",
       role: "Act as a memory-cycle analyst with skepticism about extrapolating HBM hype too far.",
       task: "Analyze selected memory/storage tickers over the lookback and financial window. Focus on HBM, DRAM pricing, NAND pricing, supply additions, hyperscaler demand, China risk, Samsung/SK Hynix behavior, margin trajectory, and analyst target changes.",
@@ -179,7 +407,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "AD_HOC",
     tags: ["financials", "quarters"],
     sourceAppHints: ["CLAUDE", "CHATGPT"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Six-Quarter Financial Review",
       role: "Act as a forensic financial analyst who refuses to let narrative outrun the numbers.",
       task: "Use the local financial context as a starting point and verify the last 6-8 quarters for each selected ticker. Analyze revenue growth, gross margin, operating margin, FCF, capex intensity, guidance changes, and whether fundamentals support the AI thesis.",
@@ -193,7 +422,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["analyst-targets", "ratings"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Analyst Target Tracker",
       role: "Act as an analyst-note tracker focused on price target revisions and institutional narrative changes.",
       task: "Find recent target-price and rating changes for selected tickers from institutions such as UBS, Morgan Stanley, Goldman Sachs, JPMorgan, Citi, BofA, Barclays, Mizuho, Evercore, KeyBanc, Susquehanna, and others. Emphasize dates, prior targets, new targets, rationale, and disagreement among firms.",
@@ -207,7 +437,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["change-detection", "narrative"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Change Detection 30D / 90D",
       role: "Act as a narrative-change detector and ignore routine news.",
       task: "Compare the selected AI infrastructure landscape today versus 30 and 90 days ago. Focus only on changes that matter for stock selection, earnings expectations, valuation, target prices, or cycle timing.",
@@ -221,8 +452,9 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["risk", "skeptic", "debias"],
     sourceAppHints: ["CLAUDE", "CHATGPT"],
-    isFavorite: true,
-    body: prompt({
+    isFavorite: false,
+    isArchived: true,
+    body: oldPrompt({
       title: "Anti-Confirmation-Bias Review",
       role: "Act as my anti-confirmation-bias analyst. Your job is not to validate my current views.",
       task: "Challenge the selected themes and tickers. Find ways the AI infrastructure thesis could be over-owned, cyclically fragile, margin-dilutive, capex constrained, overvalued, or already priced in. Identify better diversifiers if I am too concentrated in memory.",
@@ -236,7 +468,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "MONTHLY",
     tags: ["allocation", "monthly"],
     sourceAppHints: ["CLAUDE", "CHATGPT"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Monthly $2,500 Allocation Research Framework",
       role: "Act as a portfolio research analyst framing choices for a monthly AI infrastructure allocation.",
       task: "Given selected themes and tickers, propose conservative, balanced, and aggressive research allocation frameworks for my next $2,500. This is not personalized financial advice; frame tradeoffs, concentration, timing, and research priority.",
@@ -250,7 +483,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "AD_HOC",
     tags: ["earnings", "prep"],
     sourceAppHints: ["PERPLEXITY", "CLAUDE"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Earnings Prep",
       role: "Act as an earnings-prep analyst focused on what matters before the report.",
       task: "For selected tickers with upcoming or recent earnings, identify consensus expectations, guideposts, key segment metrics, management commentary to watch, implied expectations, and likely upside/downside scenario triggers.",
@@ -264,7 +498,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "AD_HOC",
     tags: ["earnings", "postmortem"],
     sourceAppHints: ["PERPLEXITY", "CLAUDE"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Earnings Postmortem",
       role: "Act as a post-earnings analyst separating signal from stock reaction.",
       task: "Analyze the selected ticker's latest earnings, call transcript, guidance, segment commentary, margin/FCF trajectory, analyst reactions, and price move. Identify what truly changed versus what was noise.",
@@ -278,7 +513,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["power", "cooling"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Power / Cooling Watch",
       role: "Act as a data-center physical-infrastructure analyst focused on power and thermal bottlenecks.",
       task: "Research data-center power availability, grid interconnection delays, on-site generation, nuclear/gas commentary, electrical gear backlogs, liquid cooling adoption, and which selected companies are converting bottlenecks into revenue.",
@@ -292,7 +528,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["networking", "optics", "interconnect"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Optics / Networking Watch",
       role: "Act as an AI data-movement analyst covering networking, optics, copper, CXL, and interconnect bottlenecks.",
       task: "Research the selected networking/optics names for product-cycle timing, hyperscaler adoption, Ethernet versus InfiniBand, optical module demand, silicon photonics, CXL/connectivity exposure, and margin risks.",
@@ -306,7 +543,8 @@ export const PROMPT_SEEDS: PromptSeed[] = [
     cadence: "WEEKLY",
     tags: ["robotics", "drones", "physical-ai"],
     sourceAppHints: ["PERPLEXITY", "GEMINI"],
-    body: prompt({
+    isArchived: true,
+    body: oldPrompt({
       title: "Robotics / Drones / Physical AI Watch",
       role: "Act as a physical-AI analyst who distinguishes demos from deployable revenue.",
       task: "Research robotics, drones, autonomy, and defense AI names. Focus on revenue proof, order flow, unit economics, deployment constraints, regulatory catalysts, and which public companies are real arms dealers versus hype trades.",

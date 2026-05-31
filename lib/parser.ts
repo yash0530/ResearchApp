@@ -1,4 +1,4 @@
-import { CYCLE_STAGES, LEVELS, SENTIMENTS } from "./enums";
+import { CYCLE_STAGES, LEVELS, SENTIMENTS, VERDICT_STANCES } from "./enums";
 
 export type ParsedSignalBlock = {
   claims: ParsedClaimInput[];
@@ -8,6 +8,7 @@ export type ParsedSignalBlock = {
   analystTargets: ParsedAnalystTargetInput[];
   themeSignals: ParsedThemeSignalInput[];
   watchItems: ParsedWatchItemInput[];
+  verdicts: ParsedVerdictInput[];
   discoveries: ParsedDiscoveryInput[];
   questions: ParsedQuestionInput[];
   lineCount: number;
@@ -74,6 +75,15 @@ export type ParsedWatchItemInput = {
   timeframe?: string;
 };
 
+export type ParsedVerdictInput = {
+  ticker?: string;
+  themeSlug?: string;
+  stance: "RESEARCH_NOW" | "WATCH" | "DEFER" | "AVOID";
+  priority?: number;
+  horizon?: string;
+  rationale: string;
+};
+
 export type ParsedDiscoveryInput = {
   symbol: string;
   companyName?: string;
@@ -101,6 +111,7 @@ export function parseSignalDeskBlock(rawOutput: string): ParsedSignalBlock {
     analystTargets: [],
     themeSignals: [],
     watchItems: [],
+    verdicts: [],
     discoveries: [],
     questions: [],
     lineCount: 0,
@@ -211,6 +222,21 @@ export function parseSignalDeskBlock(rawOutput: string): ParsedSignalBlock {
           });
           break;
         }
+        case "VERDICT": {
+          const stance = normalizeVerdictStance(fields.stance);
+          const rationale = clean(fields.rationale || fields.reason);
+          if (!stance) throw new Error("missing stance");
+          if (!rationale) throw new Error("missing rationale");
+          empty.verdicts.push({
+            ticker: cleanTicker(fields.ticker),
+            themeSlug: cleanTheme(fields.theme),
+            stance,
+            priority: normalizeConfidence(fields.priority),
+            horizon: clean(fields.horizon),
+            rationale,
+          });
+          break;
+        }
         case "DISCOVERY_TICKER": {
           const symbol = cleanTicker(fields.ticker || fields.symbol);
           if (!symbol) throw new Error("missing ticker");
@@ -308,5 +334,12 @@ function normalizeCycle(value?: string) {
   const cycle = value?.trim().toUpperCase();
   return CYCLE_STAGES.includes(cycle as (typeof CYCLE_STAGES)[number])
     ? (cycle as "DORMANT" | "EMERGING" | "HEATING_UP" | "CROWDED" | "ROLLING_OVER")
+    : undefined;
+}
+
+function normalizeVerdictStance(value?: string) {
+  const stance = value?.trim().toUpperCase();
+  return VERDICT_STANCES.includes(stance as (typeof VERDICT_STANCES)[number])
+    ? (stance as "RESEARCH_NOW" | "WATCH" | "DEFER" | "AVOID")
     : undefined;
 }

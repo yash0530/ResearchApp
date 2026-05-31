@@ -15,6 +15,7 @@ export default async function BuilderPage({
 
   const [prompts, themes, tickers] = await Promise.all([
     prisma.promptTemplate.findMany({
+      where: { isArchived: false },
       orderBy: [{ isFavorite: "desc" }, { title: "asc" }],
       select: {
         id: true,

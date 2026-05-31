@@ -15,6 +15,8 @@ export default async function ResearchPage() {
           catalysts: true,
           analystTargets: true,
           tickerMentions: true,
+          verdicts: true,
+          questions: true,
         },
       },
     },
@@ -42,12 +44,16 @@ export default async function ResearchPage() {
           updatedAt: formatDate(entry.updatedAt),
           summary: entry.summary,
           rawPreview: entry.rawOutput.slice(0, 360),
+          rawOutput: entry.rawOutput, // Full raw text passed for interactive re-parsing
+          runId: entry.runId,
           counts: {
             claims: entry._count.claims,
             risks: entry._count.risks,
             catalysts: entry._count.catalysts,
             targets: entry._count.analystTargets,
             tickers: entry._count.tickerMentions,
+            verdicts: entry._count.verdicts,
+            questions: entry._count.questions,
           },
         }))}
       />

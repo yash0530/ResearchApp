@@ -65,6 +65,13 @@ enum DiscoveryStatus {
   IGNORED
 }
 
+enum VerdictStance {
+  RESEARCH_NOW
+  WATCH
+  DEFER
+  AVOID
+}
+
 model Theme {
   id          String        @id @default(cuid())
   slug        String        @unique
@@ -115,6 +122,7 @@ model PromptTemplate {
   tags           String        @default("[]")
   variableSchema String        @default("{}")
   isFavorite     Boolean       @default(false)
+  isArchived     Boolean       @default(false)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   runs           ResearchRun[]
@@ -152,6 +160,7 @@ model ResearchEntry {
   status         ResearchStatus        @default(ACTIVE)
   parseStatus    String                @default("UNPARSED")
   parseError     String?
+  ignoredLines   String                @default("[]")
   deletedAt      DateTime?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
@@ -162,6 +171,8 @@ model ResearchEntry {
   analystTargets ParsedAnalystTarget[]
   themeSignals   ParsedThemeSignal[]
   watchItems     ParsedWatchItem[]
+  verdicts       ParsedVerdict[]
+  questions      ParsedQuestion[]
 
   @@index([createdAt])
   @@index([status])
@@ -276,6 +287,36 @@ model ParsedWatchItem {
   @@index([themeSlug])
 }
 
+model ParsedVerdict {
+  id        String        @id @default(cuid())
+  entryId   String
+  entry     ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  ticker    String?
+  themeSlug String?
+  stance    VerdictStance
+  priority  Int?
+  horizon   String?
+  rationale String
+  createdAt DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+  @@index([stance])
+}
+
+model ParsedQuestion {
+  id        String        @id @default(cuid())
+  entryId   String
+  entry     ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text      String
+  ticker    String?
+  themeSlug String?
+  createdAt DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
 model DiscoveryCandidate {
   id              String          @id @default(cuid())
   symbol          String          @unique
@@ -290,24 +331,31 @@ model DiscoveryCandidate {
 }
 
 model TickerMetricSnapshot {
-  id                  String   @id @default(cuid())
-  tickerId            String
-  ticker              Ticker   @relation(fields: [tickerId], references: [id], onDelete: Cascade)
-  symbol              String
-  price               Float?
-  marketCap           Float?
-  week52High          Float?
-  week52Low           Float?
-  forwardPe           Float?
-  trailingPe          Float?
-  analystMeanTarget   Float?
-  ytdReturnPct        Float?
-  oneMonthReturnPct   Float?
-  threeMonthReturnPct Float?
-  sixMonthReturnPct   Float?
-  oneYearReturnPct    Float?
-  asOf                DateTime @default(now())
-  createdAt           DateTime @default(now())
+  id                      String   @id @default(cuid())
+  tickerId                String
+  ticker                  Ticker   @relation(fields: [tickerId], references: [id], onDelete: Cascade)
+  symbol                  String
+  price                   Float?
+  marketCap               Float?
+  week52High              Float?
+  week52Low               Float?
+  forwardPe               Float?
+  trailingPe              Float?
+  analystMeanTarget       Float?
+  ytdReturnPct            Float?
+  oneMonthReturnPct       Float?
+  threeMonthReturnPct     Float?
+  sixMonthReturnPct       Float?
+  oneYearReturnPct        Float?
+  // Finance-grounding columns (additive, all nullable except defaults)
+  sector                  String?
+  beta                    Float?
+  sectorMomentumPercentile Float?
+  forwardPeSectorAvg      Float?
+  spotlightTags           String   @default("[]")
+  dataSource              String   @default("yahoo")
+  asOf                    DateTime @default(now())
+  createdAt               DateTime @default(now())
 
   @@index([symbol])
   @@index([tickerId, asOf])
