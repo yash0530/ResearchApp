@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { TickerClient } from "@/components/ticker-client";
+import { ensureMarketData, validateSymbol } from "@/lib/market";
 
 export const dynamic = "force-dynamic";
 
@@ -12,29 +14,66 @@ export default async function TickerDetailPage({ params }: PageProps) {
   const { symbol } = await params;
   const uppercaseSymbol = symbol.toUpperCase().trim();
 
-  // Find ticker metadata
-  const tickerRow = await prisma.ticker.findUnique({
+  // Find ticker metadata or auto-create for valid US stocks
+  let tickerRow = await prisma.ticker.findUnique({
     where: { symbol: uppercaseSymbol },
   });
 
   if (!tickerRow) {
-    notFound();
+    const v = await validateSymbol(uppercaseSymbol);
+    if (v.dataStatus === "UNVERIFIED" && !v.companyName) {
+      notFound();
+    }
+    tickerRow = await prisma.ticker.create({
+      data: {
+        symbol: uppercaseSymbol,
+        companyName: v.companyName ?? null,
+        dataStatus: v.dataStatus,
+      },
+    });
   }
 
   // Get the latest metric snapshot
-  const snapshotRow = await prisma.tickerMetricSnapshot.findFirst({
+  let snapshotRow = await prisma.tickerMetricSnapshot.findFirst({
     where: { symbol: uppercaseSymbol },
     orderBy: { asOf: "desc" },
   });
 
-  // Extract defensively, casting to any so that if Phase 2 columns aren't migrated, we fall back gracefully
+  const SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
+  const isColdOrStale = !snapshotRow || (Date.now() - snapshotRow.asOf.getTime() > SNAPSHOT_TTL_MS);
+
+  if (isColdOrStale) {
+    if (!snapshotRow) {
+      // Cold first visit: do a synchronous populate so the page isn't empty
+      try {
+        await ensureMarketData([uppercaseSymbol]);
+        // Re-query the snapshot after creation
+        snapshotRow = await prisma.tickerMetricSnapshot.findFirst({
+          where: { symbol: uppercaseSymbol },
+          orderBy: { asOf: "desc" },
+        });
+      } catch {
+        /* offline -> gracefully ignore */
+      }
+    } else {
+      // Subsequent stale load: refresh in the background using after()
+      after(async () => {
+        try {
+          await ensureMarketData([uppercaseSymbol]);
+        } catch (e) {
+          console.error("Background refresh failed:", e);
+        }
+      });
+    }
+  }
+
+  // Extract directly as the schema is fully migrated and typed
   let snapshotFormatted = null;
   if (snapshotRow) {
-    const rawAny = snapshotRow as any;
     let spotlightTags: string[] = [];
-    if (rawAny.spotlightTags) {
+    if (snapshotRow.spotlightTags) {
       try {
-        spotlightTags = typeof rawAny.spotlightTags === "string" ? JSON.parse(rawAny.spotlightTags) : rawAny.spotlightTags;
+        spotlightTags = typeof snapshotRow.spotlightTags === "string" ? JSON.parse(snapshotRow.spotlightTags) : snapshotRow.spotlightTags;
       } catch {
         spotlightTags = [];
       }
@@ -54,13 +93,12 @@ export default async function TickerDetailPage({ params }: PageProps) {
       sixMonthReturnPct: snapshotRow.sixMonthReturnPct,
       oneYearReturnPct: snapshotRow.oneYearReturnPct,
       asOf: snapshotRow.asOf.toISOString(),
-      // Defensive columns
-      sector: rawAny.sector ?? null,
-      beta: rawAny.beta ?? null,
-      sectorMomentumPercentile: rawAny.sectorMomentumPercentile ?? null,
-      forwardPeSectorAvg: rawAny.forwardPeSectorAvg ?? null,
+      sector: snapshotRow.sector ?? null,
+      beta: snapshotRow.beta ?? null,
+      sectorMomentumPercentile: snapshotRow.sectorMomentumPercentile ?? null,
+      forwardPeSectorAvg: snapshotRow.forwardPeSectorAvg ?? null,
       spotlightTags,
-      dataSource: rawAny.dataSource ?? "yahoo",
+      dataSource: snapshotRow.dataSource ?? "yahoo",
     };
   }
 

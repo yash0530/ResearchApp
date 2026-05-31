@@ -79,6 +79,9 @@ function looksApplied(name: string) {
   if (name.endsWith("_entry_ignored_lines")) {
     return hasColumn("ResearchEntry", "ignoredLines");
   }
+  if (name.endsWith("_day_change_pct")) {
+    return hasColumn("TickerMetricSnapshot", "dayChangePct");
+  }
   return false;
 }
 

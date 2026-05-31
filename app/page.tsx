@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { prettifyEnum } from "@/lib/enums";
+import { getMarketMovers } from "@/lib/finance-client";
 
 export const dynamic = "force-dynamic";
 
@@ -75,25 +76,31 @@ export default async function Home() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
 
-  // Fetch Grounded Movers from Flask API
-  let movers: { gainers: any[]; losers: any[] } | null = null;
-  try {
-    const moversRes = await fetch("http://localhost:5001/api/terminal/movers?top_n=5", {
-      signal: AbortSignal.timeout(1000),
-    });
-    if (moversRes.ok) {
-      const moversData = await moversRes.json();
-      const rawMovers = moversData.movers || moversData.data || moversData;
-      if (rawMovers && (rawMovers.gainers || rawMovers.losers)) {
-        movers = {
-          gainers: Array.isArray(rawMovers.gainers) ? rawMovers.gainers.slice(0, 4) : [],
-          losers: Array.isArray(rawMovers.losers) ? rawMovers.losers.slice(0, 4) : [],
-        };
-      }
-    }
-  } catch (e) {
-    movers = null;
-  }
+  // Fetch S&P 500 movers safely via the finance client
+  const movers = await getMarketMovers(5);
+
+  // Build the portfolio daily movers strip from latest snapshots of tracked tickers
+  const trackedSymbols = topTickers.map(([symbol]) => symbol);
+  const latestSnapshots = await Promise.all(
+    trackedSymbols.map((symbol) =>
+      prisma.tickerMetricSnapshot.findFirst({
+        where: { symbol },
+        orderBy: { asOf: "desc" },
+      })
+    )
+  );
+
+  const portfolioMovers = latestSnapshots
+    .filter((s): s is NonNullable<typeof s> => s !== null && s.dayChangePct !== null && Number.isFinite(s.dayChangePct))
+    .map((s) => ({
+      ticker: s.symbol,
+      change_pct: s.dayChangePct!,
+    }));
+
+  const sortedPortfolioMovers = [...portfolioMovers].sort((a, b) => b.change_pct - a.change_pct);
+  const portfolioGainers = sortedPortfolioMovers.filter((m) => m.change_pct >= 0).slice(0, 4);
+  const portfolioLosers = [...sortedPortfolioMovers].reverse().filter((m) => m.change_pct < 0).slice(0, 4);
+  const showPortfolioMovers = portfolioGainers.length > 0 || portfolioLosers.length > 0;
 
   return (
     <div className="space-y-6">
@@ -111,55 +118,131 @@ export default async function Home() {
         </Link>
       </div>
 
-      {/* Grounded Movers Strip if Flask is online */}
-      {movers && (
-        <section className="panel panel-pad bg-[var(--panel)] grid gap-4 md:grid-cols-2">
-          {/* Top gainers */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--good)] flex items-center gap-1">
-              <TrendingUp size={14} /> Top Grounded Gainers
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              {movers.gainers.map((m: any, idx: number) => {
-                const isPos = m.change_pct && m.change_pct > 0;
-                return (
-                  <Link
-                    key={idx}
-                    href={`/tickers/${m.ticker}`}
-                    className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)] flex items-center justify-between text-xs transition"
-                  >
-                    <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
-                    <span className="font-mono font-semibold text-[var(--good)]">
-                      {isPos ? "+" : ""}{(m.change_pct * 100).toFixed(2)}%
-                    </span>
-                  </Link>
-                );
-              })}
-              {movers.gainers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+      {/* Portfolio Movers Strip */}
+      {showPortfolioMovers && (
+        <section className="panel panel-pad bg-[var(--panel)] space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <h2 className="text-sm font-bold flex items-center gap-1.5 text-[var(--text)]">
+              <Activity size={16} className="text-[var(--accent)]" /> Your Tickers — Today
+            </h2>
+            <p className="text-[10px] text-[var(--muted)]">Daily percentage change of your tracked portfolio tickers.</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Portfolio gainers */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--good)] flex items-center gap-1">
+                <TrendingUp size={14} /> Gainers
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {portfolioGainers.map((m: any, idx: number) => {
+                  const val = Number(m.change_pct);
+                  const isValid = m.change_pct != null && Number.isFinite(val);
+                  return (
+                    <Link
+                      key={idx}
+                      href={`/tickers/${m.ticker}`}
+                      className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)] flex items-center justify-between text-xs transition"
+                    >
+                      <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
+                      <span className="font-mono font-semibold text-[var(--good)]">
+                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {portfolioGainers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+              </div>
+            </div>
+
+            {/* Portfolio losers */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--bad)] flex items-center gap-1">
+                <TrendingDown size={14} /> Losers
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {portfolioLosers.map((m: any, idx: number) => {
+                  const val = Number(m.change_pct);
+                  const isValid = m.change_pct != null && Number.isFinite(val);
+                  return (
+                    <Link
+                      key={idx}
+                      href={`/tickers/${m.ticker}`}
+                      className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)] flex items-center justify-between text-xs transition"
+                    >
+                      <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
+                      <span className="font-mono font-semibold text-[var(--bad)]">
+                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {portfolioLosers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+              </div>
             </div>
           </div>
+        </section>
+      )}
 
-          {/* Top losers */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--bad)] flex items-center gap-1">
-              <TrendingDown size={14} /> Top Grounded Losers
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              {movers.losers.map((m: any, idx: number) => {
-                return (
-                  <Link
-                    key={idx}
-                    href={`/tickers/${m.ticker}`}
-                    className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)] flex items-center justify-between text-xs transition"
-                  >
-                    <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
-                    <span className="font-mono font-semibold text-[var(--bad)]">
-                      {(m.change_pct * 100).toFixed(2)}%
-                    </span>
-                  </Link>
-                );
-              })}
-              {movers.losers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+      {/* Grounded Movers Strip if Flask is online */}
+      {movers && (
+        <section className="panel panel-pad bg-[var(--panel)]/60 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <h2 className="text-sm font-bold flex items-center gap-1.5 text-[var(--text)]">
+              <Activity size={16} className="text-[var(--accent)]" /> Market Movers — S&P 500 (daily)
+            </h2>
+            <p className="text-[10px] text-[var(--muted)]">Live daily movers from the finance terminal — secondary reference.</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Top gainers */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--good)]/80 flex items-center gap-1">
+                <TrendingUp size={14} /> Top Gainers
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {movers.gainers.slice(0, 4).map((m: any, idx: number) => {
+                  const val = Number(m.change_pct);
+                  const isValid = m.change_pct != null && Number.isFinite(val);
+                  return (
+                    <Link
+                      key={idx}
+                      href={`/tickers/${m.ticker}`}
+                      className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)]/50 flex items-center justify-between text-xs transition"
+                    >
+                      <span className="font-mono font-bold text-[var(--text)]/80">${m.ticker}</span>
+                      <span className="font-mono font-semibold text-[var(--good)]/80">
+                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {movers.gainers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+              </div>
+            </div>
+
+            {/* Top losers */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--bad)]/80 flex items-center gap-1">
+                <TrendingDown size={14} /> Top Losers
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {movers.losers.slice(0, 4).map((m: any, idx: number) => {
+                  const val = Number(m.change_pct);
+                  const isValid = m.change_pct != null && Number.isFinite(val);
+                  return (
+                    <Link
+                      key={idx}
+                      href={`/tickers/${m.ticker}`}
+                      className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 hover:border-[var(--accent)]/50 flex items-center justify-between text-xs transition"
+                    >
+                      <span className="font-mono font-bold text-[var(--text)]/80">${m.ticker}</span>
+                      <span className="font-mono font-semibold text-[var(--bad)]/80">
+                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {movers.losers.length === 0 && <span className="text-xs text-[var(--muted)]">None found</span>}
+              </div>
             </div>
           </div>
         </section>

@@ -123,6 +123,26 @@ export function TickerClient({
               <span className={`badge text-[10px] ${dataStatus === "VERIFIED" ? "bg-[var(--good)]/10 border-[var(--good)]/30 text-[var(--good)]" : "bg-[var(--warn)]/10 border-[var(--warn)]/30 text-[var(--warn)]"}`}>
                 {dataStatus}
               </span>
+              {snapshot && (() => {
+                const isStale = Date.now() - new Date(snapshot.asOf).getTime() > 6 * 60 * 60 * 1000;
+                let badgeText = "";
+                let badgeClass = "";
+                if (isStale) {
+                  badgeText = "Stale >6h";
+                  badgeClass = "bg-[var(--bad)]/10 border-[var(--bad)]/30 text-[var(--bad)]";
+                } else if (snapshot.dataSource === "finance") {
+                  badgeText = "Live (finance)";
+                  badgeClass = "bg-[var(--good)]/10 border-[var(--good)]/30 text-[var(--good)]";
+                } else {
+                  badgeText = "Yahoo fallback";
+                  badgeClass = "bg-[var(--muted)]/10 border-[var(--border)] text-[var(--muted)]";
+                }
+                return (
+                  <span className={`badge text-[10px] ${badgeClass}`}>
+                    {badgeText}
+                  </span>
+                );
+              })()}
             </div>
             {companyName && <h1 className="text-lg font-bold text-[var(--muted)]">{companyName}</h1>}
             

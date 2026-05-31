@@ -3,9 +3,22 @@ import {
   getGroundedTicker,
   financeHealthy,
   FINANCE_API_BASE,
+  getGroundedChart,
 } from "@/lib/finance-client";
 
 // ── Sample data fixtures ──────────────────────────────────────────────────────
+
+const SAMPLE_HEADER_ROW = {
+  company_name: "Micron Technology Inc",
+  sector: "Information Technology",
+  current_price: 107.5,
+  beta: 1.35,
+  forward_pe: 14.5,
+  trailing_pe: 22.3,
+  market_cap: 118_000_000_000,
+  analyst_target: 125.0,
+  day_change_percent: 1.25,
+};
 
 const SAMPLE_COMPANY_ROW = {
   ticker: "MU",
@@ -62,6 +75,9 @@ describe("getGroundedTicker", () => {
   it("maps a sample S&P 500 company row into the normalised GroundedTicker shape", async () => {
     fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/stock/MU/header")) {
+        return makeOkResponse({ data: SAMPLE_HEADER_ROW });
+      }
       if (url.includes("/api/market/sp500/company/MU")) {
         return makeOkResponse(SAMPLE_COMPANY_ROW);
       }
@@ -124,6 +140,9 @@ describe("getGroundedTicker", () => {
     // Minimal row — only ticker present; everything else absent.
     fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/stock/XYZ/header")) {
+        return makeOkResponse({ data: { company_name: "XYZ", current_price: null } });
+      }
       if (url.includes("/api/market/sp500/company/")) {
         return makeOkResponse({ ticker: "XYZ" });
       }
@@ -142,6 +161,87 @@ describe("getGroundedTicker", () => {
     expect(result!.sectorMomentumPercentile).toBeNull();
     expect(result!.forwardPeSectorAvg).toBeNull();
     expect(result!.spotlightTags).toEqual([]);
+  });
+
+  it("ZZZZ regression test: returns null when header is invalid/has no real data and S&P returns 404", async () => {
+    fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/stock/ZZZZ/header")) {
+        return makeOkResponse({
+          data: {
+            company_name: "ZZZZ",
+            current_price: null,
+            market_cap: null,
+            beta: null,
+          },
+        });
+      }
+      return makeNotFoundResponse();
+    });
+
+    const result = await getGroundedTicker("ZZZZ");
+    expect(result).toBeNull();
+  });
+
+  it("non-S&P path: returns grounded data when header has data but S&P returns 404", async () => {
+    fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/stock/NONSP/header")) {
+        return makeOkResponse({
+          data: {
+            company_name: "Non-S&P Corp",
+            sector: "Technology",
+            current_price: 50.0,
+            market_cap: 5000000000,
+            forward_pe: 25.0,
+            trailing_pe: 28.0,
+            beta: 1.1,
+            analyst_target: 60.0,
+            day_change_percent: 3.5,
+          },
+        });
+      }
+      return makeNotFoundResponse();
+    });
+
+    const result = await getGroundedTicker("NONSP");
+    expect(result).not.toBeNull();
+    expect(result!.symbol).toBe("NONSP");
+    expect(result!.companyName).toBe("Non-S&P Corp");
+    expect(result!.sector).toBe("Technology");
+    expect(result!.price).toBe(50.0);
+    expect(result!.marketCap).toBe(5000000000);
+    expect(result!.forwardPe).toBe(25.0);
+    expect(result!.trailingPe).toBe(28.0);
+    expect(result!.beta).toBe(1.1);
+    expect(result!.analystTarget).toBe(60.0);
+    expect(result!.dayChangePct).toBe(3.5);
+    // relative metrics should be null and spotlightTags empty
+    expect(result!.sectorMomentumPercentile).toBeNull();
+    expect(result!.forwardPeSectorAvg).toBeNull();
+    expect(result!.spotlightTags).toEqual([]);
+  });
+
+  it("getGroundedChart: maps time/close, sorts ascending, and drops non-finite bars", async () => {
+    fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      makeOkResponse({
+        data: {
+          bars: [
+            { time: "2026-05-26T12:00:00Z", close: 122.5 },
+            { time: "2026-05-25T12:00:00Z", close: 120.0 },
+            { time: "2026-05-27T12:00:00Z", close: null },
+          ],
+        },
+      })
+    );
+
+    const result = await getGroundedChart("MU");
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(2);
+    expect(result![0].date).toBe("2026-05-25T12:00:00Z");
+    expect(result![0].close).toBe(120.0);
+    expect(result![1].date).toBe("2026-05-26T12:00:00Z");
+    expect(result![1].close).toBe(122.5);
   });
 
   it("exports FINANCE_API_BASE defaulting to localhost:5001", () => {

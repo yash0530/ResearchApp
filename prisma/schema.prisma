@@ -347,6 +347,7 @@ model TickerMetricSnapshot {
   threeMonthReturnPct     Float?
   sixMonthReturnPct       Float?
   oneYearReturnPct        Float?
+  dayChangePct            Float?
   // Finance-grounding columns (additive, all nullable except defaults)
   sector                  String?
   beta                    Float?

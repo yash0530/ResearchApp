@@ -21,10 +21,12 @@ export type GroundedTicker = {
   sector: string | null;
   price: number | null;
   yearChangePct: number | null;
+  dayChangePct: number | null;
   forwardPe: number | null;
   trailingPe: number | null;
   beta: number | null;
   marketCap: number | null;
+  analystTarget: number | null;
   sectorMomentumPercentile: number | null;
   forwardPeSectorAvg: number | null;
   spotlightTags: string[];
@@ -129,101 +131,134 @@ function deriveSpotlightTags(row: Record<string, unknown>): string[] {
 }
 
 // Compute sector momentum percentile from the sp500 companies list.
-// We fetch the sector list once per call. This is a cheap in-memory sort.
-async function fetchSectorMomentumPercentile(
-  symbol: string,
-  sector: string,
+function computeSectorMomentumPercentile(
+  rows: Array<Record<string, unknown>>,
   yearChange: number | null,
-): Promise<number | null> {
-  if (yearChange === null || !sector) return null;
-  try {
-    const encodedSector = encodeURIComponent(sector);
-    const data = await safeGet<{ data?: Array<Record<string, unknown>> }>(
-      `/api/market/sp500/companies/${encodedSector}`,
-    );
-    const rows = data?.data;
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+): number | null {
+  if (yearChange === null) return null;
+  const changes = rows
+    .map((r) => num(r.year_change))
+    .filter((v): v is number => v !== null)
+    .sort((a, b) => a - b);
 
-    const changes = rows
-      .map((r) => num(r.year_change))
-      .filter((v): v is number => v !== null)
-      .sort((a, b) => a - b);
-
-    if (changes.length === 0) return null;
-    const rank = changes.filter((v) => v <= yearChange).length;
-    return Math.round((rank / changes.length) * 100);
-  } catch {
-    return null;
-  }
+  if (changes.length === 0) return null;
+  const rank = changes.filter((v) => v <= yearChange).length;
+  return Math.round((rank / changes.length) * 100);
 }
 
-// Compute sector forward P/E average from the sector companies endpoint.
-async function fetchForwardPeSectorAvg(sector: string): Promise<number | null> {
-  if (!sector) return null;
-  try {
-    const encodedSector = encodeURIComponent(sector);
-    const data = await safeGet<{ data?: Array<Record<string, unknown>> }>(
-      `/api/market/sp500/companies/${encodedSector}`,
-    );
-    const rows = data?.data;
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+// Compute sector forward P/E average from the sector companies list.
+function computeForwardPeSectorAvg(rows: Array<Record<string, unknown>>): number | null {
+  const pes = rows
+    .map((r) => num(r.forward_pe))
+    .filter((v): v is number => v !== null && v > 0 && v < 200);
 
-    const pes = rows
-      .map((r) => num(r.forward_pe))
-      .filter((v): v is number => v !== null && v > 0 && v < 200);
+  if (pes.length === 0) return null;
+  return Math.round((pes.reduce((a, b) => a + b, 0) / pes.length) * 100) / 100;
+}
 
-    if (pes.length === 0) return null;
-    return Math.round((pes.reduce((a, b) => a + b, 0) / pes.length) * 100) / 100;
-  } catch {
-    return null;
-  }
+// Fetch the universal per-ticker header (works for any US ticker). ToolResult → data{}.
+async function fetchStockHeader(symbol: string): Promise<Record<string, unknown> | null> {
+  const res = await safeGet<{ data?: Record<string, unknown> }>(
+    `/api/stock/${encodeURIComponent(symbol)}/header`,
+  );
+  const d = res?.data;
+  return d && typeof d === "object" ? d : null;
 }
 
 // ── Exported API ─────────────────────────────────────────────────────────────
 
 /**
- * Fetch a single S&P 500 company row and enrich with percentile/sector data.
+ * Fetch a single stock and enrich with percentile/sector data if in S&P 500.
  * Returns null if the ticker is not found or the server is unreachable.
  */
 export async function getGroundedTicker(symbol: string): Promise<GroundedTicker | null> {
   try {
     const upper = symbol.toUpperCase().trim();
-    const row = await safeGet<Record<string, unknown>>(
-      `/api/market/sp500/company/${encodeURIComponent(upper)}`,
-    );
-    if (!row || typeof row !== "object" || "error" in row) return null;
-
-    const sector = str(row.sector);
-    const yearChange = num(row.year_change);
-
-    // Fetch enrichment in parallel — both may return null, that's fine.
-    const [sectorMomentumPercentile, forwardPeSectorAvg] = await Promise.all([
-      sector && yearChange !== null
-        ? fetchSectorMomentumPercentile(upper, sector, yearChange)
-        : Promise.resolve(null),
-      sector ? fetchForwardPeSectorAvg(sector) : Promise.resolve(null),
+    const [header, sp] = await Promise.all([
+      fetchStockHeader(upper),
+      safeGet<Record<string, unknown>>(`/api/market/sp500/company/${encodeURIComponent(upper)}`),
     ]);
+
+    // The header endpoint echoes the ticker as company_name with all-null
+    // financials for nonexistent symbols, so it is NOT a valid existence check.
+    // Treat the header as real only if it carries actual numeric data.
+    const headerHasData =
+      header != null &&
+      (num(header.current_price) !== null || num(header.market_cap) !== null);
+    const usableHeader = headerHasData ? header : null;
+
+    const hasSpError = !sp || typeof sp !== "object" || "error" in sp;
+    if (!usableHeader && hasSpError) return null;
+
+    const spRow = hasSpError ? null : sp;
+    const sector = str(usableHeader?.sector) ?? str(spRow?.sector);
+    const yearChange = num(spRow?.year_change);
+
+    let sectorMomentumPercentile: number | null = null;
+    let forwardPeSectorAvg: number | null = null;
+
+    if (sector) {
+      const encodedSector = encodeURIComponent(sector);
+      const data = await safeGet<{ data?: Array<Record<string, unknown>> }>(
+        `/api/market/sp500/companies/${encodedSector}`,
+      );
+      const sectorCompanies = data?.data;
+      if (Array.isArray(sectorCompanies) && sectorCompanies.length > 0) {
+        sectorMomentumPercentile = computeSectorMomentumPercentile(sectorCompanies, yearChange);
+        forwardPeSectorAvg = computeForwardPeSectorAvg(sectorCompanies);
+      }
+    }
+
+    const companyName = str(usableHeader?.company_name) ?? str(spRow?.company_name);
+    const price = num(usableHeader?.current_price) ?? num(spRow?.current_price_fmt) ?? num(spRow?.price);
+    const forwardPe = num(usableHeader?.forward_pe) ?? num(spRow?.forward_pe);
+    const trailingPe = num(usableHeader?.trailing_pe) ?? num(usableHeader?.pe_ratio) ?? num(spRow?.trailing_pe);
+    const beta = num(usableHeader?.beta) ?? num(spRow?.beta);
+    const marketCap = num(usableHeader?.market_cap) ?? num(spRow?.market_cap);
+    const analystTarget = num(usableHeader?.analyst_target);
+    const yearChangePct = yearChange !== null ? Math.round(yearChange * 10000) / 100 : null;
+    const dayChangePct = usableHeader ? num(usableHeader.day_change_percent) : null;
+
+    const spotlightTags = spRow ? deriveSpotlightTags(spRow) : [];
 
     return {
       symbol: upper,
-      companyName: str(row.company_name),
+      companyName,
       sector,
-      price: num(row.current_price_fmt) ?? num(row.price),
-      yearChangePct:
-        yearChange !== null ? Math.round(yearChange * 10000) / 100 : null,
-      forwardPe: num(row.forward_pe),
-      trailingPe: num(row.trailing_pe) ?? num(row.pe_ratio),
-      beta: num(row.beta),
-      marketCap: num(row.market_cap),
+      price,
+      yearChangePct,
+      dayChangePct,
+      forwardPe,
+      trailingPe,
+      beta,
+      marketCap,
+      analystTarget,
       sectorMomentumPercentile,
       forwardPeSectorAvg,
-      spotlightTags: deriveSpotlightTags(row),
+      spotlightTags,
       source: "finance",
       asOf: new Date(),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch one-year price history bars via /api/chart/<ticker> and return chronologically sorted array.
+ */
+export async function getGroundedChart(symbol: string): Promise<Array<{ date: string; close: number }> | null> {
+  const res = await safeGet<{ data?: any }>(`/api/chart/${encodeURIComponent(symbol)}?range=1y`);
+  const bars = res?.data?.bars ?? res?.data?.prices ?? res?.data?.candles ?? res?.data;
+  if (!Array.isArray(bars) || bars.length === 0) return null;
+  const rows = bars
+    .map((b: any) => ({
+      date: str(b.date ?? b.t ?? b.timestamp ?? b.time) ?? "",
+      close: num(b.close ?? b.c ?? b.adj_close) ?? NaN,
+    }))
+    .filter((r) => r.date && Number.isFinite(r.close))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return rows.length ? rows : null;
 }
 
 /**
@@ -307,6 +342,25 @@ export async function financeHealthy(): Promise<boolean> {
     return data !== null && typeof data === "object";
   } catch {
     return false;
+  }
+}
+
+/**
+ * Fetch daily movers (gainers & losers) from /api/terminal/movers using safeGet.
+ */
+export async function getMarketMovers(topN: number = 5): Promise<{ gainers: any[]; losers: any[] } | null> {
+  try {
+    const data = await safeGet<any>(`/api/terminal/movers?top_n=${topN}`);
+    const rawMovers = data?.movers ?? data?.data ?? data;
+    if (rawMovers && (rawMovers.gainers || rawMovers.losers)) {
+      return {
+        gainers: Array.isArray(rawMovers.gainers) ? rawMovers.gainers : [],
+        losers: Array.isArray(rawMovers.losers) ? rawMovers.losers : [],
+      };
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
