@@ -1,0 +1,334 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum SourceApp {
+  PERPLEXITY
+  CLAUDE
+  GEMINI
+  CHATGPT
+  MANUAL
+}
+
+enum Cadence {
+  DAILY
+  WEEKLY
+  MONTHLY
+  AD_HOC
+}
+
+enum ResearchStatus {
+  ACTIVE
+  STALE
+  INCORRECT
+  ARCHIVED
+}
+
+enum RunStatus {
+  DRAFT
+  COPIED
+  LAUNCHED
+  OUTPUT_SAVED
+  PARSED
+}
+
+enum Level {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Sentiment {
+  BULLISH
+  NEUTRAL
+  BEARISH
+  MIXED
+}
+
+enum CycleStage {
+  DORMANT
+  EMERGING
+  HEATING_UP
+  CROWDED
+  ROLLING_OVER
+}
+
+enum DiscoveryStatus {
+  NEW
+  ACCEPTED
+  REJECTED
+  IGNORED
+}
+
+model Theme {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  name        String
+  description String
+  color       String        @default("#2563eb")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  tickerLinks TickerTheme[]
+}
+
+model Ticker {
+  id              String                 @id @default(cuid())
+  symbol          String                 @unique
+  companyName     String?
+  notes           String?
+  isActive        Boolean                @default(true)
+  isSeeded        Boolean                @default(false)
+  dataStatus      String                 @default("UNVERIFIED")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  themeLinks      TickerTheme[]
+  metricSnapshots TickerMetricSnapshot[]
+  financials      FinancialQuarter[]
+}
+
+model TickerTheme {
+  tickerId  String
+  themeId   String
+  role      String?
+  purity    Int     @default(3)
+  isPrimary Boolean @default(false)
+  ticker    Ticker  @relation(fields: [tickerId], references: [id], onDelete: Cascade)
+  theme     Theme   @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  @@id([tickerId, themeId])
+  @@index([themeId])
+}
+
+model PromptTemplate {
+  id             String        @id @default(cuid())
+  title          String
+  slug           String        @unique
+  description    String
+  body           String
+  cadence        Cadence       @default(AD_HOC)
+  sourceAppHints String        @default("[]")
+  tags           String        @default("[]")
+  variableSchema String        @default("{}")
+  isFavorite     Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  runs           ResearchRun[]
+}
+
+model ResearchRun {
+  id               String           @id @default(cuid())
+  promptTemplateId String?
+  promptTemplate   PromptTemplate?  @relation(fields: [promptTemplateId], references: [id], onDelete: SetNull)
+  sourceApp        SourceApp        @default(MANUAL)
+  variableValues   String           @default("{}")
+  renderedPrompt   String
+  status           RunStatus        @default(DRAFT)
+  copiedAt         DateTime?
+  launchedAt       DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  entry            ResearchEntry?
+
+  @@index([createdAt])
+  @@index([sourceApp])
+  @@index([status])
+}
+
+model ResearchEntry {
+  id             String                @id @default(cuid())
+  runId          String?               @unique
+  run            ResearchRun?          @relation(fields: [runId], references: [id], onDelete: SetNull)
+  title          String
+  sourceApp      SourceApp             @default(MANUAL)
+  rawOutput      String
+  summary        String?
+  notes          String?
+  status         ResearchStatus        @default(ACTIVE)
+  parseStatus    String                @default("UNPARSED")
+  parseError     String?
+  deletedAt      DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  claims         ParsedClaim[]
+  risks          ParsedRisk[]
+  catalysts      ParsedCatalyst[]
+  tickerMentions ParsedTickerMention[]
+  analystTargets ParsedAnalystTarget[]
+  themeSignals   ParsedThemeSignal[]
+  watchItems     ParsedWatchItem[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model ParsedClaim {
+  id         String        @id @default(cuid())
+  entryId    String
+  entry      ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text       String
+  ticker     String?
+  themeSlug  String?
+  confidence Int?
+  importance Level?
+  sourceUrl  String?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
+model ParsedRisk {
+  id        String        @id @default(cuid())
+  entryId   String
+  entry     ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text      String
+  ticker    String?
+  themeSlug String?
+  severity  Level?
+  timeframe String?
+  sourceUrl String?
+  createdAt DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
+model ParsedCatalyst {
+  id         String        @id @default(cuid())
+  entryId    String
+  entry      ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text       String
+  ticker     String?
+  themeSlug  String?
+  importance Level?
+  timeframe  String?
+  sourceUrl  String?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
+model ParsedTickerMention {
+  id         String        @id @default(cuid())
+  entryId    String
+  entry      ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  ticker     String
+  themeSlug  String?
+  sentiment  Sentiment?
+  confidence Int?
+  role       String?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
+model ParsedAnalystTarget {
+  id             String        @id @default(cuid())
+  entryId        String
+  entry          ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  ticker         String
+  firm           String?
+  rating         String?
+  target         Float?
+  previousTarget Float?
+  date           DateTime?
+  sourceUrl      String?
+  createdAt      DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([firm])
+}
+
+model ParsedThemeSignal {
+  id         String      @id @default(cuid())
+  entryId    String
+  entry      ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  themeSlug  String
+  cycle      CycleStage?
+  crowding   Level?
+  confidence Int?
+  summary    String?
+  createdAt  DateTime    @default(now())
+
+  @@index([themeSlug])
+}
+
+model ParsedWatchItem {
+  id        String        @id @default(cuid())
+  entryId   String
+  entry     ResearchEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text      String
+  ticker    String?
+  themeSlug String?
+  timeframe String?
+  createdAt DateTime      @default(now())
+
+  @@index([ticker])
+  @@index([themeSlug])
+}
+
+model DiscoveryCandidate {
+  id              String          @id @default(cuid())
+  symbol          String          @unique
+  companyName     String?
+  suggestedThemes String          @default("[]")
+  sourceLine      String?
+  status          DiscoveryStatus @default(NEW)
+  occurrences     Int             @default(1)
+  firstSeenAt     DateTime        @default(now())
+  lastSeenAt      DateTime        @default(now())
+  acceptedTickerId String?
+}
+
+model TickerMetricSnapshot {
+  id                  String   @id @default(cuid())
+  tickerId            String
+  ticker              Ticker   @relation(fields: [tickerId], references: [id], onDelete: Cascade)
+  symbol              String
+  price               Float?
+  marketCap           Float?
+  week52High          Float?
+  week52Low           Float?
+  forwardPe           Float?
+  trailingPe          Float?
+  analystMeanTarget   Float?
+  ytdReturnPct        Float?
+  oneMonthReturnPct   Float?
+  threeMonthReturnPct Float?
+  sixMonthReturnPct   Float?
+  oneYearReturnPct    Float?
+  asOf                DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  @@index([symbol])
+  @@index([tickerId, asOf])
+}
+
+model FinancialQuarter {
+  id             String   @id @default(cuid())
+  tickerId       String
+  ticker         Ticker   @relation(fields: [tickerId], references: [id], onDelete: Cascade)
+  symbol         String
+  quarter        String
+  periodEnd      DateTime?
+  revenue        Float?
+  grossProfit    Float?
+  operatingIncome Float?
+  netIncome      Float?
+  grossMargin    Float?
+  fcf            Float?
+  capex          Float?
+  asOf           DateTime @default(now())
+
+  @@unique([tickerId, quarter])
+  @@index([symbol])
+}
