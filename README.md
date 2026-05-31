@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Signal Desk
 
-## Getting Started
+Signal Desk is a local-first AI infrastructure research workspace. It stores reusable prompts, renders enum-driven prompt runs, opens external research apps with copy-first launch, captures pasted outputs, parses strict `SIGNAL_DESK_DATA` blocks, tracks ticker discoveries, and visualizes claims/risks/targets over time.
 
-First, run the development server:
+## Stack
+
+- Next.js App Router + TypeScript
+- Prisma + SQLite
+- Tailwind CSS
+- Recharts
+- lucide-react
+- yahoo-finance2 for lightweight cached market context
+
+## Setup
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Create the local SQLite database, generate Prisma Client, and seed the curated AI infrastructure universe:
+
+```bash
+npm run db:setup
+```
+
+Run the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Core Workflow
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Go to `/builder`.
+2. Pick source app, prompt, themes, tickers, lookback, financial window, and horizon.
+3. Render the prompt. Signal Desk creates a run and injects cached local market context.
+4. Copy/open Perplexity, Claude, Gemini, ChatGPT, or manual mode.
+5. Paste the external output into `/runs`.
+6. Signal Desk saves raw output, parses the strict block, creates discoveries for unknown tickers, and updates `/insights`.
 
-## Learn More
+## Verification
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run lint
+npm test
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- This app does not call external AI APIs or automate logged-in websites.
+- Firm-specific targets like UBS or Morgan Stanley are captured from pasted research via `TARGET` lines.
+- Prisma migrate was flaky in this local Node/SQLite environment, so `db:setup` applies the checked-in migration SQL directly and remains idempotent.
