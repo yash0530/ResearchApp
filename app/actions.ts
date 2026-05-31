@@ -14,7 +14,7 @@ import { ensureMarketData, validateSymbol } from "@/lib/market";
 import { refreshSp500 } from "@/lib/finance-client";
 import { buildLocalContext, renderPrompt, type BuilderValues, type LocalContextTicker } from "@/lib/prompt-renderer";
 import { getLaunchPlan } from "@/lib/launch";
-import { parseSignalDeskBlock, cleanTicker } from "@/lib/parser";
+import { parseResearchOutput, cleanTicker } from "@/lib/parser";
 import { HORIZONS, FINANCIAL_WINDOWS, LOOKBACKS, SOURCE_APPS } from "@/lib/enums";
 
 /**
@@ -122,7 +122,7 @@ export async function saveResearchOutputAction(input: z.infer<typeof researchOut
   const existing = values.runId
     ? await prisma.researchEntry.findUnique({ where: { runId: values.runId } })
     : null;
-  const parsed = parseSignalDeskBlock(values.rawOutput);
+  const parsed = parseResearchOutput(values.rawOutput);
   const parseStatus = parsed.lineCount ? "PARSED" : "NO_BLOCK";
 
   const entry = existing
@@ -173,7 +173,7 @@ export async function saveResearchOutputAction(input: z.infer<typeof researchOut
   return { entryId: entry.id, parseStatus, ignoredCount: parsed.ignoredLines.length };
 }
 
-async function replaceParsedRows(entryId: string, parsed: ReturnType<typeof parseSignalDeskBlock>) {
+async function replaceParsedRows(entryId: string, parsed: ReturnType<typeof parseResearchOutput>) {
   const knownTickers = new Set((await prisma.ticker.findMany({ select: { symbol: true } })).map((t) => t.symbol));
   await prisma.$transaction([
     prisma.parsedClaim.deleteMany({ where: { entryId } }),

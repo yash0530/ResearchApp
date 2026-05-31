@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSignalDeskBlock } from "@/lib/parser";
+import { parseSignalDeskBlock, parseResearchOutput } from "@/lib/parser";
 
 describe("parseSignalDeskBlock", () => {
   it("parses a valid Signal Desk block", () => {
@@ -53,3 +53,156 @@ SIGNAL_DESK_DATA_END
     expect(parsed.claims).toEqual([]);
   });
 });
+
+describe("parseResearchOutput JSON block support", () => {
+  it("parses a valid markdown report + valid JSON code block with all groups", () => {
+    const raw = `
+# Executive Summary
+The HBM market is seeing unprecedented growth.
+
+| Ticker | Price | Metric |
+|--------|-------|--------|
+| MU     | $155  | HBM3E  |
+
+\`\`\`json
+{
+  "themes": [{"theme":"memory_storage","cycle":"heating_up","crowding":"high","confidence":4,"summary":"HBM tightness"}],
+  "tickers": [{"ticker":"MU","theme":"memory_storage","sentiment":"bullish","confidence":4,"role":"HBM beneficiary"}],
+  "claims": [{"text":"HBM demand is supply constrained","ticker":"MU","theme":"memory_storage","confidence":4,"importance":"high"}],
+  "risks": [{"text":"DRAM pricing rolls over","ticker":"MU","theme":"memory_storage","severity":"high","timeframe":"next_quarter"}],
+  "catalysts": [{"text":"Guidance raised","ticker":"MU","theme":"memory_storage","importance":"medium","timeframe":"next_quarter"}],
+  "targets": [{"ticker":"MU","firm":"UBS","rating":"buy","target":155,"previous_target":140,"date":"2026-05-20"}],
+  "watch": [{"text":"Gross margin guide","ticker":"MU","theme":"memory_storage","timeframe":"next_2_quarters"}],
+  "verdicts": [{"ticker":"MU","theme":"memory_storage","stance":"RESEARCH_NOW","priority":4,"horizon":"next_12_months","rationale":"Structural demand driver."}],
+  "discoveries": [{"ticker":"ALAB","company":"Astera Labs","theme":"networking_optics_interconnect","reason":"connectivity exposure"}],
+  "questions": [{"text":"Too dependent on one hyperscaler capex cycle?","ticker":"MU","theme":"memory_storage"}]
+}
+\`\`\`
+`;
+    const parsed = parseResearchOutput(raw);
+
+    expect(parsed.ignoredLines).toHaveLength(0);
+    expect(parsed.themeSignals).toHaveLength(1);
+    expect(parsed.themeSignals[0]).toMatchObject({ themeSlug: "memory_storage", cycle: "HEATING_UP", crowding: "HIGH", confidence: 4, summary: "HBM tightness" });
+    expect(parsed.tickerMentions).toHaveLength(1);
+    expect(parsed.tickerMentions[0]).toMatchObject({ ticker: "MU", sentiment: "BULLISH", confidence: 4, role: "HBM beneficiary" });
+    expect(parsed.claims).toHaveLength(1);
+    expect(parsed.claims[0]).toMatchObject({ text: "HBM demand is supply constrained", ticker: "MU", importance: "HIGH" });
+    expect(parsed.risks).toHaveLength(1);
+    expect(parsed.risks[0]).toMatchObject({ text: "DRAM pricing rolls over", ticker: "MU", severity: "HIGH", timeframe: "next_quarter" });
+    expect(parsed.catalysts).toHaveLength(1);
+    expect(parsed.catalysts[0]).toMatchObject({ text: "Guidance raised", ticker: "MU", importance: "MEDIUM", timeframe: "next_quarter" });
+    expect(parsed.analystTargets).toHaveLength(1);
+    expect(parsed.analystTargets[0]).toMatchObject({ ticker: "MU", firm: "UBS", rating: "buy", target: 155, previousTarget: 140 });
+    expect(parsed.watchItems).toHaveLength(1);
+    expect(parsed.watchItems[0]).toMatchObject({ text: "Gross margin guide", ticker: "MU", timeframe: "next_2_quarters" });
+    expect(parsed.verdicts).toHaveLength(1);
+    expect(parsed.verdicts[0]).toMatchObject({ ticker: "MU", stance: "RESEARCH_NOW", priority: 4, rationale: "Structural demand driver." });
+    expect(parsed.discoveries).toHaveLength(1);
+    expect(parsed.discoveries[0]).toMatchObject({ symbol: "ALAB", companyName: "Astera Labs", suggestedTheme: "networking_optics_interconnect" });
+    expect(parsed.questions).toHaveLength(1);
+    expect(parsed.questions[0]).toMatchObject({ text: "Too dependent on one hyperscaler capex cycle?", ticker: "MU" });
+  });
+
+  it("handles mixed enums and missing verdict rationale gracefully by filtering into ignoredLines", () => {
+    const raw = `
+\`\`\`json
+{
+  "verdicts": [
+    {"ticker":"MU","theme":"memory_storage","stance":"MAYBE","priority":4,"horizon":"next_12_months","rationale":"Invalid stance"},
+    {"ticker":"MU","theme":"memory_storage","stance":"RESEARCH_NOW","priority":4,"horizon":"next_12_months"}
+  ]
+}
+\`\`\`
+`;
+    const parsed = parseResearchOutput(raw);
+    expect(parsed.verdicts).toHaveLength(0);
+    expect(parsed.ignoredLines).toHaveLength(2);
+  });
+
+  it("falls back to legacy SIGNAL_DESK block when no fenced json block is found", () => {
+    const raw = `
+Readable report first.
+
+SIGNAL_DESK_DATA_START
+THEME|theme=memory_storage|cycle=heating_up|crowding=high|confidence=4|summary=HBM tightness
+SIGNAL_DESK_DATA_END
+`;
+    const parsed = parseResearchOutput(raw);
+    expect(parsed.themeSignals).toHaveLength(1);
+    expect(parsed.themeSignals[0].themeSlug).toBe("memory_storage");
+    expect(parsed.ignoredLines).toHaveLength(0);
+  });
+
+  it("gracefully catches JSON block with invalid JSON content and registers an ignoredLines error", () => {
+    const raw = `
+\`\`\`json
+{
+  "themes": [{"theme": "memory_storage", "cycle": "heating_up"
+}
+\`\`\`
+`;
+    const parsed = parseResearchOutput(raw);
+    expect(parsed.themeSignals).toHaveLength(0);
+    expect(parsed.ignoredLines).toHaveLength(1);
+    expect(parsed.ignoredLines[0]).toContain("Found a ```json block but it failed to parse as JSON.");
+  });
+
+  it("handles unexpected JSON types without throwing", () => {
+    const raw = `
+\`\`\`json
+{
+  "themes": [{
+    "theme": 123,
+    "cycle": true,
+    "crowding": ["high"],
+    "confidence": {},
+    "summary": false
+  }],
+  "tickers": [{
+    "ticker": true,
+    "theme": ["memory"],
+    "sentiment": 999,
+    "confidence": []
+  }],
+  "claims": [{
+    "text": 456,
+    "ticker": {},
+    "confidence": false,
+    "importance": true,
+    "sourceUrl": []
+  }],
+  "targets": [{
+    "ticker": 7203,
+    "target": true,
+    "previousTarget": [],
+    "date": {}
+  }]
+}
+\`\`\`
+`;
+    const parsed = parseResearchOutput(raw);
+    // 123 as theme slug is parsed since we convert numbers to string! Let's check:
+    expect(parsed.themeSignals).toHaveLength(1);
+    expect(parsed.themeSignals[0].themeSlug).toBe("123");
+    expect(parsed.themeSignals[0].cycle).toBeUndefined(); // true is invalid cycle
+    expect(parsed.themeSignals[0].crowding).toBeUndefined(); // array is invalid crowding
+    expect(parsed.themeSignals[0].confidence).toBeUndefined(); // object is invalid confidence
+    expect(parsed.themeSignals[0].summary).toBe("false"); // boolean converted to string!
+
+    // ticker: true is invalid and ignored (length is 0)
+    expect(parsed.tickerMentions).toHaveLength(0);
+
+    // text: 456 is converted to string "456"
+    expect(parsed.claims).toHaveLength(1);
+    expect(parsed.claims[0].text).toBe("456");
+
+    // ticker: 7203 is converted to string "7203"
+    expect(parsed.analystTargets).toHaveLength(1);
+    expect(parsed.analystTargets[0].ticker).toBe("7203");
+    expect(parsed.analystTargets[0].target).toBeUndefined(); // boolean true is invalid target
+    expect(parsed.analystTargets[0].previousTarget).toBeUndefined(); // array is invalid target
+    expect(parsed.analystTargets[0].date).toBeUndefined(); // object is invalid date
+  });
+});
+

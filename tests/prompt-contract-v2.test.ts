@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROMPT_SEEDS } from "../lib/seed-prompts";
 import { renderPrompt } from "../lib/prompt-renderer";
-import { parseSignalDeskBlock } from "../lib/parser";
+import { parseResearchOutput } from "../lib/parser";
 
 describe("Prompt Contract v2 & Seed Tests", () => {
   it("has exactly 6 active v2 prompts and 15 archived old prompts", () => {
@@ -75,11 +75,9 @@ describe("Prompt Contract v2 & Seed Tests", () => {
       expect(rendered).toContain("next_12_months");
       expect(rendered).toContain("LOCAL_TICKER|ticker=MU|price=100");
 
-      // Verify exactly two occurrences of literal strings SIGNAL_DESK_DATA_START and SIGNAL_DESK_DATA_END (one in instructions, one in example)
-      const startCount = (rendered.match(/SIGNAL_DESK_DATA_START/g) || []).length;
-      const endCount = (rendered.match(/SIGNAL_DESK_DATA_END/g) || []).length;
-      expect(startCount).toBe(2);
-      expect(endCount).toBe(2);
+      // Verify exactly one occurrence of literal fenced JSON tag (in example)
+      const jsonCount = (rendered.match(/```json/g) || []).length;
+      expect(jsonCount).toBe(1);
     }
   });
 
@@ -103,24 +101,12 @@ describe("Prompt Contract v2 & Seed Tests", () => {
     }
   });
 
-  it("PARSE_CONTRACT example block parses with zero ignored lines and produces all required record types", () => {
-    // Extract the SIGNAL_DESK example embedded in the first active prompt body.
-    // The PARSE_CONTRACT string is shared across all active prompts, so any one of them works.
+  it("OUTPUT_FORMAT example JSON block parses with zero ignored lines and produces all required record types", () => {
     const active = PROMPT_SEEDS.filter((p) => !p.isArchived);
     expect(active.length).toBeGreaterThan(0);
 
     const body = active[0].body;
-
-    // Isolate just the example block (second occurrence of the markers — first is in the prose instruction).
-    const allBlocks = [...body.matchAll(/SIGNAL_DESK_DATA_START([\s\S]*?)SIGNAL_DESK_DATA_END/gi)];
-    // The contract embeds exactly one example block; there should be at least one match.
-    expect(allBlocks.length).toBeGreaterThanOrEqual(1);
-
-    // Use the last match, which is the example block at the end of the contract text.
-    const lastMatch = allBlocks[allBlocks.length - 1];
-    const syntheticBlock = `SIGNAL_DESK_DATA_START${lastMatch[1]}SIGNAL_DESK_DATA_END`;
-
-    const parsed = parseSignalDeskBlock(syntheticBlock);
+    const parsed = parseResearchOutput(body);
 
     // Zero ignored lines — every line in the example must be parseable by the parser.
     expect(parsed.ignoredLines, `Ignored lines: ${JSON.stringify(parsed.ignoredLines)}`).toHaveLength(0);

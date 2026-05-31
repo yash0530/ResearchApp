@@ -5,7 +5,8 @@ import Link from "next/link";
 import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, RefreshCw, Save } from "lucide-react";
 import { createRenderedRunAction, markRunLaunchedAction, saveResearchOutputAction, refreshTickerDataAction } from "@/app/actions";
 import { FINANCIAL_WINDOWS, HORIZONS, LOOKBACKS, SOURCE_APP_LABELS, SOURCE_APPS, prettifyEnum } from "@/lib/enums";
-import { parseSignalDeskBlock } from "@/lib/parser";
+import { parseResearchOutput } from "@/lib/parser";
+import { Markdown } from "@/components/markdown";
 import type { LaunchPlan } from "@/lib/launch";
 
 const MAX_TICKERS = 12;
@@ -85,6 +86,7 @@ export function BuilderClient({
   const [saveResult, setSaveResult] = useState<{ entryId: string; parseStatus: string; ignoredCount: number } | null>(null);
   const [saveError, setSaveError] = useState("");
   const [ignoredExpanded, setIgnoredExpanded] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
 
   // Refresh ticker state
   const [isRefreshing, startRefreshTransition] = useTransition();
@@ -141,7 +143,7 @@ export function BuilderClient({
   // Live parse preview — computed on every keystroke, no debounce needed for pure fn
   const liveParsed = useMemo(() => {
     if (!captureOutput.trim()) return null;
-    return parseSignalDeskBlock(captureOutput);
+    return parseResearchOutput(captureOutput);
   }, [captureOutput]);
 
   function toggleTheme(slug: string) {
@@ -534,15 +536,32 @@ export function BuilderClient({
           </Field>
 
           <div>
-            <span className="label">Answer from {appLabel}</span>
-            <textarea
-              className="textarea text-sm leading-7"
-              style={{ minHeight: "180px" }}
-              value={captureOutput}
-              onChange={(e) => setCaptureOutput(e.target.value)}
-              disabled={!activeRendered}
-              placeholder={`Paste the full answer from ${appLabel} here, including the SIGNAL_DESK_DATA_START … SIGNAL_DESK_DATA_END block.`}
-            />
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="label mb-0">Answer from {appLabel}</span>
+              {captureOutput.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewMode((v) => !v)}
+                  className="btn px-2 py-1 text-xs"
+                >
+                  {isPreviewMode ? "Edit Raw" : "Preview Report"}
+                </button>
+              )}
+            </div>
+            {isPreviewMode ? (
+              <div className="textarea text-sm leading-7 overflow-y-auto bg-[var(--bg)] border border-[var(--border)] p-3 rounded-md" style={{ minHeight: "180px", maxHeight: "400px" }}>
+                <Markdown>{captureOutput}</Markdown>
+              </div>
+            ) : (
+              <textarea
+                className="textarea text-sm leading-7"
+                style={{ minHeight: "180px" }}
+                value={captureOutput}
+                onChange={(e) => setCaptureOutput(e.target.value)}
+                disabled={!activeRendered}
+                placeholder={`Paste the full answer from ${appLabel} here, including the fenced json block.`}
+              />
+            )}
           </div>
 
           {/* Live parse tally */}
@@ -649,7 +668,7 @@ function ParseTally({
   expanded,
   onToggleExpanded,
 }: {
-  parsed: ReturnType<typeof parseSignalDeskBlock>;
+  parsed: ReturnType<typeof parseResearchOutput>;
   expanded: boolean;
   onToggleExpanded: () => void;
 }) {

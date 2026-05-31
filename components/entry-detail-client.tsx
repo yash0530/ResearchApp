@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Markdown } from "@/components/markdown";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -587,9 +588,16 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
           </details>
         )}
 
+        <div className="space-y-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] block">Rendered Research Report</span>
+          <div className="p-4 rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <Markdown>{entry.rawOutput}</Markdown>
+          </div>
+        </div>
+
         <details className="group border border-[var(--border)] rounded-md bg-[var(--bg)] overflow-hidden">
           <summary className="p-3 font-semibold text-xs text-[var(--text)] select-none cursor-pointer hover:bg-[var(--soft)] flex items-center justify-between transition">
-            <span>Click to expand raw output & parse logs ({entry.rawOutput.length} characters)</span>
+            <span>Show raw source ({entry.rawOutput.length} characters)</span>
             <span className="text-[var(--muted)] group-open:rotate-180 transition-transform duration-200">▼</span>
           </summary>
           <div className="p-3 border-t border-[var(--border)] space-y-3 bg-[var(--panel)]">

@@ -12,34 +12,33 @@ type PromptSeed = {
   body: string;
 };
 
-const PARSE_CONTRACT = `Write the full readable human report first. The machine parse block goes at the very end of your response — nothing may appear after the closing data marker.
+const OUTPUT_FORMAT = `## How to format your answer
 
-Parse block rules:
-- Wrap all data lines in exactly one SIGNAL_DESK_DATA_START / SIGNAL_DESK_DATA_END pair; your response must end the moment the closing marker appears.
-- The human-readable report must precede the data block entirely — never interleave prose and data lines.
-- Use only: THEME, TICKER, CLAIM, RISK, CATALYST, TARGET, WATCH, VERDICT, DISCOVERY_TICKER, QUESTION.
-- Format every machine-readable line as TYPE|key=value|key=value.
-- Do not use pipe characters inside values. Omit any unknown fields.
-- confidence and priority must be integers 1-5.
-- importance, severity, and crowding must be exactly: low, medium, or high.
-- cycle must be exactly: dormant, emerging, heating_up, crowded, or rolling_over.
-- stance must be exactly: RESEARCH_NOW, WATCH, DEFER, or AVOID.
-- sentiment must be exactly: bullish, neutral, bearish, or mixed.
-- Emit a DISCOVERY_TICKER line for every ticker you mention that is NOT in my selected ticker list, no exceptions.
+Write a clear, skeptical, sourced research report for a human first, USING MARKDOWN TABLES wherever you compare multiple things (tickers, verdicts, targets, risks). Suggested sections (include the ones that apply): Summary, Tickers, Verdicts, Catalysts, Risks, Analyst Targets, Theme Read, Watch List, Open Questions. Be specific, cite dates for events/target changes/earnings, separate proven numbers from narrative, and include disconfirming evidence.
 
-Required example (copy this exact structure):
-SIGNAL_DESK_DATA_START
-THEME|theme=memory_storage|cycle=heating_up|crowding=high|confidence=4|summary=HBM tightness persists into next quarter
-TICKER|ticker=MU|theme=memory_storage|sentiment=bullish|confidence=4|role=HBM beneficiary
-CLAIM|text=HBM demand is supply constrained through next reported quarter|ticker=MU|theme=memory_storage|confidence=4|importance=high
-RISK|text=DRAM pricing rolls over faster than expected|ticker=MU|theme=memory_storage|severity=high|timeframe=next_quarter
-CATALYST|text=Management raises HBM revenue guide|ticker=MU|theme=memory_storage|importance=medium|timeframe=next_quarter
-TARGET|ticker=MU|firm=UBS|rating=buy|target=155|previous_target=140|date=2026-05-20
-WATCH|text=Gross margin trajectory versus prior guide|ticker=MU|theme=memory_storage|timeframe=next_2_quarters
-VERDICT|ticker=MU|theme=memory_storage|stance=RESEARCH_NOW|priority=4|horizon=next_12_months|rationale=Structural HBM demand with near-term supply tightness supports price
-DISCOVERY_TICKER|ticker=ALAB|company=Astera Labs|theme=networking_optics_interconnect|reason=CXL and connectivity exposure adds second-derivative upside
-QUESTION|text=Is this thesis too dependent on one hyperscaler capex cycle?|ticker=MU|theme=memory_storage
-SIGNAL_DESK_DATA_END`;
+Then, at the VERY END, output exactly ONE fenced code block tagged \`json\` that encodes the same findings as structured data. Nothing after it.
+
+Rules for the JSON block:
+- Use only these arrays (omit any that are empty): themes, tickers, claims, risks, catalysts, targets, watch, verdicts, discoveries, questions.
+- Enums (lowercase): cycle = dormant|emerging|heating_up|crowded|rolling_over; crowding/importance/severity = low|medium|high; sentiment = bullish|neutral|bearish|mixed. Uppercase: stance = RESEARCH_NOW|WATCH|DEFER|AVOID.
+- confidence and priority are integers 1-5. Numbers (target, previous_target) are plain numbers, no $ or commas. Dates are YYYY-MM-DD.
+- For ANY ticker you mention that is NOT in my selected ticker list, add an entry to discoveries.
+
+Example (shape only — replace with your real findings):
+\`\`\`json
+{
+  "themes": [{"theme":"memory_storage","cycle":"heating_up","crowding":"high","confidence":4,"summary":"HBM tightness"}],
+  "tickers": [{"ticker":"MU","theme":"memory_storage","sentiment":"bullish","confidence":4,"role":"HBM beneficiary"}],
+  "claims": [{"text":"HBM demand is supply constrained","ticker":"MU","theme":"memory_storage","confidence":4,"importance":"high"}],
+  "risks": [{"text":"DRAM pricing rolls over","ticker":"MU","theme":"memory_storage","severity":"high","timeframe":"next_quarter"}],
+  "catalysts": [{"text":"Guidance raised","ticker":"MU","theme":"memory_storage","importance":"medium","timeframe":"next_quarter"}],
+  "targets": [{"ticker":"MU","firm":"UBS","rating":"buy","target":155,"previous_target":140,"date":"2026-05-20"}],
+  "watch": [{"text":"Gross margin guide","ticker":"MU","theme":"memory_storage","timeframe":"next_2_quarters"}],
+  "verdicts": [{"ticker":"MU","theme":"memory_storage","stance":"RESEARCH_NOW","priority":4,"horizon":"next_12_months","rationale":"Structural demand driver."}],
+  "discoveries": [{"ticker":"ALAB","company":"Astera Labs","theme":"networking_optics_interconnect","reason":"connectivity exposure"}],
+  "questions": [{"text":"Too dependent on one hyperscaler capex cycle?","ticker":"MU","theme":"memory_storage"}]
+}
+\`\`\``;
 
 function promptV2({
   title,
@@ -91,7 +90,7 @@ Requirements:
 1. Markdown table with columns: ${tableColumns.join(" | ")}.
 ${bullets.map((b) => `- ${b}`).join("\n")}
 
-${PARSE_CONTRACT}`;
+${OUTPUT_FORMAT}`;
 }
 
 const OLD_PARSE_CONTRACT = `
