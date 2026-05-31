@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { Copy, Save, Star, Trash2, GitBranchPlus } from "lucide-react";
+import { Copy, Save, Star, Trash2, GitBranchPlus, Wand2 } from "lucide-react";
 import {
   deletePromptAction,
   duplicatePromptAction,
@@ -69,6 +70,11 @@ export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
     });
   }
 
+  async function copyTemplate() {
+    await navigator.clipboard.writeText(draft.body);
+    setMessage("Template copied.");
+  }
+
   function remove(id: string) {
     if (!window.confirm("Delete this prompt template? Existing runs keep their rendered prompt.")) return;
     startTransition(async () => {
@@ -117,9 +123,12 @@ export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
           <div className="flex flex-wrap gap-2">
             {draft.id && (
               <>
-                <button className="btn" onClick={() => navigator.clipboard.writeText(draft.body)}>
-                  <Copy size={15} /> Copy
+                <button className="btn" onClick={copyTemplate}>
+                  <Copy size={15} /> Copy template
                 </button>
+                <Link className="btn" href={`/builder?prompt=${draft.id}`}>
+                  <Wand2 size={15} /> Use in builder
+                </Link>
                 <button className="btn" onClick={() => duplicate(draft.id)}>
                   <GitBranchPlus size={15} /> Duplicate
                 </button>
@@ -166,7 +175,7 @@ export function PromptManager({ prompts }: { prompts: PromptRow[] }) {
         </div>
         <div className="mt-3">
           <Field label="Prompt body">
-            <textarea className="textarea min-h-[560px]" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+            <textarea className="textarea min-h-[760px]" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
           </Field>
         </div>
       </section>

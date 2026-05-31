@@ -38,14 +38,18 @@ export function BuilderClient({
   prompts,
   themes,
   tickers,
+  initialPromptTemplateId,
 }: {
   prompts: PromptOption[];
   themes: ThemeOption[];
   tickers: TickerOption[];
+  initialPromptTemplateId?: string;
 }) {
   const favorite = prompts.find((prompt) => prompt.isFavorite) ?? prompts[0];
+  const initialPrompt =
+    prompts.find((prompt) => prompt.id === initialPromptTemplateId) ?? favorite;
   const [sourceApp, setSourceApp] = useState("PERPLEXITY");
-  const [promptTemplateId, setPromptTemplateId] = useState(favorite?.id ?? "");
+  const [promptTemplateId, setPromptTemplateId] = useState(initialPrompt?.id ?? "");
   const [themeSlugs, setThemeSlugs] = useState<string[]>(["memory_storage"]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>(["MU", "SNDK"].filter((ticker) => tickers.some((t) => t.symbol === ticker)));
   const [lookback, setLookback] = useState("30d");
@@ -87,18 +91,22 @@ export function BuilderClient({
 
   async function copyAndOpen() {
     if (!rendered) return;
-    await navigator.clipboard.writeText(rendered.renderedPrompt);
-    const { url, mode } = rendered.launchPlan;
-    const launched = Boolean(url);
-    if (url) {
-      if (url.startsWith("claude://")) {
-        window.location.href = url;
-      } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+    try {
+      await navigator.clipboard.writeText(rendered.renderedPrompt);
+      const { url, mode } = rendered.launchPlan;
+      const launched = Boolean(url);
+      if (url) {
+        if (url.startsWith("claude://")) {
+          window.location.href = url;
+        } else {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
       }
+      await markRunLaunchedAction(rendered.runId, launched);
+      setMessage(mode === "copy_only" ? "Prompt copied." : "Prompt copied and app opened.");
+    } catch {
+      setMessage("Browser clipboard access failed. Select the rendered prompt text and copy it manually, then open the target app.");
     }
-    await markRunLaunchedAction(rendered.runId, launched);
-    setMessage(mode === "copy_only" ? "Prompt copied." : "Prompt copied and app opened.");
   }
 
   return (

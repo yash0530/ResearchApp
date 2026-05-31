@@ -3,7 +3,16 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default async function BuilderPage() {
+export default async function BuilderPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ prompt?: string | string[] }>;
+}) {
+  const selectedPrompt = (await searchParams).prompt;
+  const initialPromptTemplateId = Array.isArray(selectedPrompt)
+    ? selectedPrompt[0]
+    : selectedPrompt;
+
   const [prompts, themes, tickers] = await Promise.all([
     prisma.promptTemplate.findMany({
       orderBy: [{ isFavorite: "desc" }, { title: "asc" }],
@@ -39,6 +48,7 @@ export default async function BuilderPage() {
       </div>
       <BuilderClient
         prompts={prompts}
+        initialPromptTemplateId={initialPromptTemplateId}
         themes={themes.map((theme) => ({
           slug: theme.slug,
           name: theme.name,
