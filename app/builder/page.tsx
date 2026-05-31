@@ -20,6 +20,7 @@ export default async function BuilderPage({
         id: true,
         title: true,
         description: true,
+        body: true,
         cadence: true,
         isFavorite: true,
       },
