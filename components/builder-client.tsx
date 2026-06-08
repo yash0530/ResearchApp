@@ -3,11 +3,14 @@
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { toast } from "sonner";
 import { createRenderedRunAction, markRunLaunchedAction, saveResearchOutputAction, refreshTickerDataAction } from "@/app/actions";
 import { FINANCIAL_WINDOWS, HORIZONS, LOOKBACKS, SOURCE_APP_LABELS, SOURCE_APPS, prettifyEnum } from "@/lib/enums";
 import { parseResearchOutput } from "@/lib/parser";
 import { Markdown } from "@/components/markdown";
 import type { LaunchPlan } from "@/lib/launch";
+import { lookbackToRange } from "@/lib/prompt-renderer";
+import { DEFAULT_PORTFOLIO_CONTEXT } from "@/lib/portfolio";
 
 const MAX_TICKERS = 12;
 
@@ -69,7 +72,8 @@ export function BuilderClient({
   const [lookback, setLookback] = useState("30d");
   const [financialWindow, setFinancialWindow] = useState("last_6_quarters");
   const [horizon, setHorizon] = useState("next_12_months");
-  const [researchType, setResearchType] = useState("dashboard");
+  const researchType = "dashboard";
+  const [tickerQuery, setTickerQuery] = useState("");
   const [rendered, setRendered] = useState<RenderedRun | null>(null);
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -102,6 +106,14 @@ export function BuilderClient({
     if (!themeSlugs.length) return tickers;
     return tickers.filter((ticker) => ticker.themeSlugs.some((slug) => themeSlugs.includes(slug)));
   }, [themeSlugs, tickers]);
+
+  const searchedTickers = useMemo(() => {
+    const q = tickerQuery.trim().toLowerCase();
+    if (!q) return visibleTickers;
+    return visibleTickers.filter(
+      (t) => t.symbol.toLowerCase().includes(q) || (t.companyName ?? "").toLowerCase().includes(q),
+    );
+  }, [visibleTickers, tickerQuery]);
 
   const selectedTickerRows = useMemo(
     () => selectedTickers.map((symbol) => tickers.find((ticker) => ticker.symbol === symbol)).filter(Boolean) as TickerOption[],
@@ -202,25 +214,31 @@ export function BuilderClient({
 
   async function copyAndOpen() {
     if (!activeRendered) return;
+    const { url, mode } = activeRendered.launchPlan;
+
+    // Clipboard is the critical step — handle its failure on its own.
     try {
       await navigator.clipboard.writeText(activeRendered.renderedPrompt);
-      const { url, mode } = activeRendered.launchPlan;
-      const didLaunch = Boolean(url);
-      if (url) {
-        if (url.startsWith("claude://")) {
-          window.location.href = url;
-        } else {
-          window.open(url, "_blank", "noopener,noreferrer");
-        }
-      }
-      await markRunLaunchedAction(activeRendered.runId, didLaunch);
-      setLaunched(true);
-      setSaveResult(null);
-      setSaveError("");
-      setMessage(mode === "copy_only" ? "Prompt copied." : "Prompt copied and app opened.");
     } catch {
-      setMessage("Browser clipboard access failed. Select the rendered prompt text and copy it manually, then open the target app.");
+      toast.error("Couldn't access the clipboard. Select the rendered prompt text and copy it manually, then open your tool.");
+      return;
     }
+
+    const didLaunch = Boolean(url);
+    if (url) {
+      if (url.startsWith("claude://")) {
+        window.location.href = url;
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    }
+    setLaunched(true);
+    setSaveResult(null);
+    setSaveError("");
+    toast.success(mode === "copy_only" ? "Prompt copied to clipboard." : `Prompt copied — opening ${appLabel}.`);
+
+    // Persist run state in the background; a DB hiccup shouldn't look like a clipboard error.
+    markRunLaunchedAction(activeRendered.runId, didLaunch).catch(() => {});
   }
 
   function saveOutput() {
@@ -238,8 +256,11 @@ export function BuilderClient({
           sourceApp: sourceApp as Parameters<typeof saveResearchOutputAction>[0]["sourceApp"],
         });
         setSaveResult(result);
+        toast.success(result.parseStatus === "PARSED" ? "Saved & parsed." : "Saved — no json data block found.");
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : "Could not save output.");
+        const msg = error instanceof Error ? error.message : "Could not save output.";
+        setSaveError(msg);
+        toast.error(msg);
       }
     });
   }
@@ -267,7 +288,7 @@ export function BuilderClient({
     if (!activeRendered || !launched) return null;
     const mode = activeRendered.launchPlan.mode;
     if (mode === "open_and_copy") {
-      return `Prompt is on your clipboard — paste it into ${appLabel}, run it, then copy the full answer (including the SIGNAL_DESK block) back here.`;
+      return `Prompt is on your clipboard — paste it into ${appLabel}, run it, then copy the full answer (including the json block at the end) back here.`;
     }
     if (mode === "prefill_url") {
       return `Prompt was pre-filled in ${appLabel} — run it, then copy the full answer back here.`;
@@ -384,9 +405,16 @@ export function BuilderClient({
               </div>
             )}
 
+            <input
+              className="input mb-2"
+              placeholder="Search tickers…"
+              value={tickerQuery}
+              onChange={(e) => setTickerQuery(e.target.value)}
+            />
+
             <div className="max-h-72 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] p-1">
               <div className="grid gap-1">
-                {visibleTickers.map((ticker) => {
+                {searchedTickers.map((ticker) => {
                   const checked = selectedTickers.includes(ticker.symbol);
                   const disabled = !checked && selectedTickers.length >= MAX_TICKERS;
                   return (
@@ -412,7 +440,7 @@ export function BuilderClient({
                     </label>
                   );
                 })}
-                {!visibleTickers.length && (
+                {!searchedTickers.length && (
                   <div className="p-3 text-sm text-[var(--muted)]">No tickers match the selected themes.</div>
                 )}
               </div>
@@ -464,9 +492,6 @@ export function BuilderClient({
             </Field>
           </div>
 
-          <Field label="Research type">
-            <input className="input" value={researchType} onChange={(e) => setResearchType(e.target.value)} />
-          </Field>
 
           <button className="btn btn-primary w-full" onClick={renderRun} disabled={isPending || !promptTemplateId}>
             <RefreshCw size={16} />
@@ -517,6 +542,7 @@ export function BuilderClient({
           value={activeRendered?.renderedPrompt || livePreview}
           readOnly
         />
+        <p className="text-xs text-[var(--muted)]">Live draft — market context, the current date, and source-app notes are finalized when you Create run.</p>
 
         {/* Capture box — visible once a run exists (always shown but disabled until run ready) */}
         <div className={`space-y-4 rounded-md border border-[var(--border)] p-4 ${!activeRendered ? "opacity-50" : ""}`}>
@@ -677,7 +703,7 @@ function ParseTally({
   if (lineCount === 0) {
     return (
       <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
-        No SIGNAL_DESK block detected yet.
+        No json data block detected yet.
       </div>
     );
   }
@@ -779,10 +805,12 @@ function renderLivePreview({
   return body
     .replaceAll("{{themes}}", themeText)
     .replaceAll("{{tickers}}", tickerText)
-    .replaceAll("{{lookback}}", values.lookback)
+    .replaceAll("{{lookback}}", lookbackToRange(values.lookback))
     .replaceAll("{{financial_window}}", values.financialWindow)
     .replaceAll("{{horizon}}", values.horizon)
     .replaceAll("{{local_context}}", localContext)
+    .replaceAll("{{today}}", new Date().toISOString().slice(0, 10))
+    .replaceAll("{{portfolio_context}}", DEFAULT_PORTFOLIO_CONTEXT)
     .replaceAll("{{research_type}}", values.researchType);
 }
 

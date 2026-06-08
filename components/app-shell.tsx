@@ -11,6 +11,8 @@ import {
   Tags,
   TrendingUp,
 } from "lucide-react";
+import { FINANCE_API_BASE } from "@/lib/finance-client";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -28,9 +30,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   // Query local finance API health status with a fast server-side ping
   let isFlaskOnline = false;
   try {
-    const healthRes = await fetch("http://localhost:5001/api/health", {
+    const healthRes = await fetch(`${FINANCE_API_BASE}/api/health`, {
       signal: AbortSignal.timeout(600),
-      cache: "no-store",
+      next: { revalidate: 30 },
     });
     isFlaskOnline = healthRes.ok;
   } catch (e) {
@@ -41,7 +43,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       {/* Sidebar for Desktop */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-[var(--border)] bg-[var(--panel)] px-4 py-5 lg:block">
-        <Link href="/" className="mb-8 flex items-center gap-3 px-2">
+        <div className="mb-8 flex items-start justify-between gap-2 px-2">
+          <Link href="/" className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[var(--text)] text-[var(--bg)]">
             <Radar size={20} />
           </div>
@@ -57,7 +60,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </div>
           </div>
-        </Link>
+          </Link>
+          <ThemeToggle />
+        </div>
         <nav className="space-y-1">
           {nav.map((item) => {
             const Icon = item.icon;
@@ -85,12 +90,15 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-semibold">Signal Desk</span>
             </div>
             
-            {/* Grounding Health Indicator Mobile */}
-            <div className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isFlaskOnline ? "bg-[var(--good)]" : "bg-[var(--bad)]"} animate-pulse`} />
-              <span className="text-[9px] font-mono text-[var(--muted)]">
-                {isFlaskOnline ? "Grounding Live" : "Yahoo Fallback"}
-              </span>
+            {/* Grounding Health Indicator + theme toggle (mobile) */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isFlaskOnline ? "bg-[var(--good)]" : "bg-[var(--bad)]"} animate-pulse`} />
+                <span className="text-[9px] font-mono text-[var(--muted)]">
+                  {isFlaskOnline ? "Grounding Live" : "Yahoo Fallback"}
+                </span>
+              </div>
+              <ThemeToggle />
             </div>
           </div>
           <nav className="flex gap-2 overflow-x-auto pb-1">

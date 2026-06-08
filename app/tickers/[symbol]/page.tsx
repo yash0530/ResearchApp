@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { TickerClient } from "@/components/ticker-client";
 import { ensureMarketData, validateSymbol } from "@/lib/market";
+import { FINANCE_API_BASE } from "@/lib/finance-client";
 
 export const dynamic = "force-dynamic";
 
@@ -149,7 +150,7 @@ export default async function TickerDetailPage({ params }: PageProps) {
 
   try {
     const newsRes = await fetch(
-      `http://localhost:5001/api/terminal/news?theme=${uppercaseSymbol}&limit=15`,
+      `${FINANCE_API_BASE}/api/terminal/news?theme=${uppercaseSymbol}&limit=15`,
       { signal: AbortSignal.timeout(1000) }
     );
     if (newsRes.ok) {
@@ -172,7 +173,7 @@ export default async function TickerDetailPage({ params }: PageProps) {
 
   try {
     const catRes = await fetch(
-      `http://localhost:5001/api/catalysts?tickers=${uppercaseSymbol}&days_ahead=90`,
+      `${FINANCE_API_BASE}/api/catalysts?tickers=${uppercaseSymbol}&days_ahead=90`,
       { signal: AbortSignal.timeout(1000) }
     );
     if (catRes.ok) {

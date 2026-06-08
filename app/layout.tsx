@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
+
+// Applies the saved theme before first paint to avoid a flash of the wrong palette.
+const themeInitScript = `(function(){try{var t=localStorage.getItem('signal-desk-theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(e){}})();`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +33,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <AppShell>{children}</AppShell>
+        <Toaster position="bottom-right" theme="system" richColors closeButton />
       </body>
     </html>
   );
