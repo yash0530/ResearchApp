@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { fmtPct } from "@/lib/format";
 import {
   ArrowRight,
   BookOpenText,
@@ -14,7 +15,6 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { prettifyEnum } from "@/lib/enums";
 import { getMarketMovers } from "@/lib/finance-client";
 
 export const dynamic = "force-dynamic";
@@ -136,7 +136,6 @@ export default async function Home() {
               <div className="grid grid-cols-2 gap-2">
                 {portfolioGainers.map((m: any, idx: number) => {
                   const val = Number(m.change_pct);
-                  const isValid = m.change_pct != null && Number.isFinite(val);
                   return (
                     <Link
                       key={idx}
@@ -145,7 +144,7 @@ export default async function Home() {
                     >
                       <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
                       <span className="font-mono font-semibold text-[var(--good)]">
-                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                        {fmtPct(val, { sign: true })}
                       </span>
                     </Link>
                   );
@@ -162,7 +161,6 @@ export default async function Home() {
               <div className="grid grid-cols-2 gap-2">
                 {portfolioLosers.map((m: any, idx: number) => {
                   const val = Number(m.change_pct);
-                  const isValid = m.change_pct != null && Number.isFinite(val);
                   return (
                     <Link
                       key={idx}
@@ -171,7 +169,7 @@ export default async function Home() {
                     >
                       <span className="font-mono font-bold text-[var(--text)]">${m.ticker}</span>
                       <span className="font-mono font-semibold text-[var(--bad)]">
-                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                        {fmtPct(val, { sign: true })}
                       </span>
                     </Link>
                   );
@@ -201,7 +199,6 @@ export default async function Home() {
               <div className="grid grid-cols-2 gap-2">
                 {movers.gainers.slice(0, 4).map((m: any, idx: number) => {
                   const val = Number(m.change_pct);
-                  const isValid = m.change_pct != null && Number.isFinite(val);
                   return (
                     <Link
                       key={idx}
@@ -210,7 +207,7 @@ export default async function Home() {
                     >
                       <span className="font-mono font-bold text-[var(--text)]/80">${m.ticker}</span>
                       <span className="font-mono font-semibold text-[var(--good)]/80">
-                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                        {fmtPct(val, { sign: true })}
                       </span>
                     </Link>
                   );
@@ -227,7 +224,6 @@ export default async function Home() {
               <div className="grid grid-cols-2 gap-2">
                 {movers.losers.slice(0, 4).map((m: any, idx: number) => {
                   const val = Number(m.change_pct);
-                  const isValid = m.change_pct != null && Number.isFinite(val);
                   return (
                     <Link
                       key={idx}
@@ -236,7 +232,7 @@ export default async function Home() {
                     >
                       <span className="font-mono font-bold text-[var(--text)]/80">${m.ticker}</span>
                       <span className="font-mono font-semibold text-[var(--bad)]/80">
-                        {isValid ? `${val >= 0 ? "+" : ""}${val.toFixed(2)}%` : "—"}
+                        {fmtPct(val, { sign: true })}
                       </span>
                     </Link>
                   );

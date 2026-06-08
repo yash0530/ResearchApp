@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { prettifyEnum } from "@/lib/enums";
 import { refreshTickerDataAction } from "@/app/actions";
+import { fmtMoney, fmtMoneyCompact, fmtMultiple } from "@/lib/format";
 
 type SnapshotType = {
   price: number | null;
@@ -186,7 +187,7 @@ export function TickerClient({
           </p>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[10px] text-[var(--muted)] border-t border-[var(--border)]/50 pt-2 font-mono">
+        <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[11px] text-[var(--muted)] border-t border-[var(--border)]/50 pt-2 font-mono">
           <span>Grounded Source: <strong className="text-[var(--text)]">{snapshot?.dataSource || "Yahoo Fallback"}</strong></span>
           {snapshot?.asOf && (
             <span>Snapshot As Of: <strong className="text-[var(--text)]">{new Date(snapshot.asOf).toLocaleString()}</strong></span>
@@ -224,11 +225,11 @@ export function TickerClient({
             <div className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-semibold mb-2">Analyst Mean Target</div>
             {meanTarget ? (
               <div className="space-y-1">
-                <div className="text-2xl font-black text-[var(--text)]">${meanTarget}</div>
+                <div className="text-2xl font-black text-[var(--text)]">{fmtMoney(meanTarget)}</div>
                 {targetGapPct !== null && (
                   <div className={`text-[10px] flex items-center gap-1 ${targetGapPct > 0 ? "text-[var(--good)]" : "text-[var(--bad)]"}`}>
                     {targetGapPct > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                    {targetGapPct > 0 ? `+${targetGapPct}% gap` : `${targetGapPct}% gap`} from price (${currentPrice})
+                    {targetGapPct > 0 ? `+${targetGapPct}% gap` : `${targetGapPct}% gap`} from price ({fmtMoney(currentPrice)})
                   </div>
                 )}
               </div>
@@ -313,13 +314,13 @@ export function TickerClient({
             </h3>
             {snapshot ? (
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <MetricItem label="Current Price" value={snapshot.price ? `$${snapshot.price}` : "—"} />
-                <MetricItem label="Market Cap" value={snapshot.marketCap ? `$${(snapshot.marketCap / 1e9).toFixed(2)}B` : "—"} />
-                <MetricItem label="52 Week High" value={snapshot.week52High ? `$${snapshot.week52High}` : "—"} />
-                <MetricItem label="52 Week Low" value={snapshot.week52Low ? `$${snapshot.week52Low}` : "—"} />
-                <MetricItem label="Trailing PE" value={snapshot.trailingPe ? `${snapshot.trailingPe}x` : "—"} />
-                <MetricItem label="Forward PE" value={snapshot.forwardPe ? `${snapshot.forwardPe}x` : "—"} />
-                <MetricItem label="Grounded Beta" value={snapshot.beta ? `${snapshot.beta.toFixed(2)}` : "—"} />
+                <MetricItem label="Current Price" value={fmtMoney(snapshot.price)} />
+                <MetricItem label="Market Cap" value={fmtMoneyCompact(snapshot.marketCap)} />
+                <MetricItem label="52 Week High" value={fmtMoney(snapshot.week52High)} />
+                <MetricItem label="52 Week Low" value={fmtMoney(snapshot.week52Low)} />
+                <MetricItem label="Trailing PE" value={fmtMultiple(snapshot.trailingPe)} />
+                <MetricItem label="Forward PE" value={fmtMultiple(snapshot.forwardPe)} />
+                <MetricItem label="Grounded Beta" value={snapshot.beta != null ? `${snapshot.beta.toFixed(2)}` : "—"} />
                 <MetricItem label="Data Source" value={snapshot.dataSource} />
               </div>
             ) : (
@@ -453,22 +454,22 @@ export function TickerClient({
             {/* Price Targets history */}
             <div className="panel panel-pad space-y-3">
               <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--muted)] border-b border-[var(--border)] pb-2 flex items-center gap-1.5">
-                <Target size={15} className="text-[var(--good)]" /> analyst target adjustments ({targets.length})
+                <Target size={15} className="text-[var(--good)]" /> Analyst Target Adjustments ({targets.length})
               </h3>
               <div className="space-y-2 max-h-[250px] overflow-y-auto">
                 {targets.map((at) => (
                   <div key={at.id} className="p-2.5 bg-[var(--bg)] border border-[var(--border)] rounded text-xs flex justify-between items-center hover:border-[var(--accent)] transition">
                     <div>
                       <div className="font-bold text-[var(--text)]">{at.firm || "Unknown Firm"}</div>
-                      <div className="text-[10px] text-[var(--muted)]">Rating: {at.rating || "—"} · {at.date ? new Date(at.date).toLocaleDateString() : ""}</div>
+                      <div className="text-[11px] text-[var(--muted)]">Rating: {at.rating || "—"} · {at.date ? new Date(at.date).toLocaleDateString() : ""}</div>
                     </div>
                     {at.target && (
                       <div className="font-mono font-bold text-[var(--text)]">
                         {at.previousTarget ? (
-                          <span className="text-[10px] text-[var(--muted)] font-normal line-through mr-1.5">${at.previousTarget}</span>
+                          <span className="text-[11px] text-[var(--muted)] font-normal line-through mr-1.5">{fmtMoney(at.previousTarget)}</span>
                         ) : null}
                         <span className={at.previousTarget && at.target > at.previousTarget ? "text-[var(--good)]" : at.previousTarget && at.target < at.previousTarget ? "text-[var(--bad)]" : ""}>
-                          ${at.target}
+                          {fmtMoney(at.target)}
                         </span>
                       </div>
                     )}
@@ -518,7 +519,7 @@ export function TickerClient({
               <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {liveNews.map((n, idx) => (
                   <div key={idx} className="p-2.5 rounded border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--bg)] transition">
-                    <div className="flex justify-between gap-2 text-[10px] text-[var(--muted)] mb-1 font-mono">
+                    <div className="flex justify-between gap-2 text-[11px] text-[var(--muted)] mb-1 font-mono">
                       <span>{n.source}</span>
                       <span>{n.time}</span>
                     </div>
@@ -548,12 +549,12 @@ export function TickerClient({
               <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {liveCatalysts.map((c, idx) => (
                   <div key={idx} className="p-2.5 rounded border border-[var(--border)] hover:border-[var(--good)] bg-[var(--bg)] transition">
-                    <div className="flex justify-between gap-2 text-[10px] text-[var(--muted)] mb-1 font-mono">
+                    <div className="flex justify-between gap-2 text-[11px] text-[var(--muted)] mb-1 font-mono">
                       <span className="font-semibold text-[var(--good)] uppercase">{prettifyEnum(c.event_type)}</span>
                       <span>{c.event_date}</span>
                     </div>
                     <p className="text-xs text-[var(--text)] leading-relaxed font-medium">{c.description}</p>
-                    <div className="text-[9px] text-[var(--muted)] font-mono mt-1">Source: {c.source}</div>
+                    <div className="text-[11px] text-[var(--muted)] font-mono mt-1">Source: {c.source}</div>
                   </div>
                 ))}
                 {liveCatalysts.length === 0 && (
@@ -584,12 +585,13 @@ function MetricItem({ label, value }: { label: string; value: string }) {
 }
 
 function ReturnItem({ label, value }: { label: string; value: number | null }) {
-  const isPos = value && value > 0;
+  const isPos = value != null && value > 0;
+  const isNeg = value != null && value < 0;
   return (
     <div className="p-2 rounded bg-[var(--bg)] border border-[var(--border)]/50 flex justify-between items-center">
       <span className="text-xs text-[var(--muted)]">{label}</span>
       {value !== null && value !== undefined ? (
-        <span className={`font-semibold font-mono ${isPos ? "text-[var(--good)]" : "text-[var(--bad)]"}`}>
+        <span className={`font-semibold font-mono ${isPos ? "text-[var(--good)]" : isNeg ? "text-[var(--bad)]" : "text-[var(--muted)]"}`}>
           {isPos ? "+" : ""}{value.toFixed(2)}%
         </span>
       ) : (

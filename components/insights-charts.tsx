@@ -8,8 +8,9 @@ import {
   XAxis,
   YAxis,
   Legend,
+  ResponsiveContainer,
 } from "recharts";
-import { cloneElement, type ReactElement } from "react";
+import { type ReactElement } from "react";
 import Link from "next/link";
 import {
   HelpCircle,
@@ -140,10 +141,10 @@ export function InsightsCharts({
               These charts run pure parsed metadata extracted from external research sessions (Perplexity, Claude, etc.).
             </p>
             <p className="text-xs text-[var(--muted)] leading-relaxed">
-              By pairing **average analyst targets** with **grounded stock prices**, we highlight disconnects where external research expects significant re-ratings relative to current S&P 500 fundamentals.
+              By pairing <strong>average analyst targets</strong> with <strong>grounded stock prices</strong>, we highlight disconnects where external research expects significant re-ratings relative to current S&P 500 fundamentals.
             </p>
           </div>
-          <div className="text-[10px] text-[var(--muted)] font-mono border-t border-[var(--border)] pt-2 mt-3">
+          <div className="text-[11px] text-[var(--muted)] font-mono border-t border-[var(--border)] pt-2 mt-3">
             System status: Grounded mapping active
           </div>
         </div>
@@ -267,7 +268,7 @@ function ChartPanel({
 }: {
   title: string;
   subtitle: string;
-  children: ReactElement<{ width?: number; height?: number }>;
+  children: ReactElement;
 }) {
   return (
     <section className="panel panel-pad bg-[var(--panel)]">
@@ -277,8 +278,10 @@ function ChartPanel({
         </h2>
         <p className="text-[11px] text-[var(--muted)]">{subtitle}</p>
       </div>
-      <div className="overflow-x-auto">
-        {cloneElement(children, { width: 620, height: 260 })}
+      <div className="w-full" style={{ height: 260 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          {children}
+        </ResponsiveContainer>
       </div>
     </section>
   );

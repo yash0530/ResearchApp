@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Save } from "lucide-react";
 import { saveResearchOutputAction } from "@/app/actions";
+import { parseResearchOutput } from "@/lib/parser";
 
 type RunRow = {
   id: string;
@@ -42,6 +43,7 @@ function RunCard({ run }: { run: RunRow }) {
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
+  const liveParsed = rawOutput.trim() ? parseResearchOutput(rawOutput) : null;
 
   function save() {
     startTransition(async () => {
@@ -98,9 +100,16 @@ function RunCard({ run }: { run: RunRow }) {
             className="textarea min-h-72"
             value={rawOutput}
             onChange={(e) => setRawOutput(e.target.value)}
-            placeholder="Paste the full Claude/Perplexity/Gemini/ChatGPT output, including SIGNAL_DESK_DATA_START..."
+            placeholder="Paste the full LLM answer here, including the fenced json block at the end."
           />
         </label>
+        {liveParsed && (
+          <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+            {liveParsed.lineCount === 0
+              ? "No json data block detected yet."
+              : `Parsed: ${liveParsed.tickerMentions.length} tickers · ${liveParsed.claims.length} claims · ${liveParsed.risks.length} risks · ${liveParsed.verdicts.length} verdicts · ${liveParsed.discoveries.length} discoveries${liveParsed.ignoredLines.length ? ` · ${liveParsed.ignoredLines.length} ignored` : ""}`}
+          </div>
+        )}
       </div>
       <div className="mt-3">
         <label>

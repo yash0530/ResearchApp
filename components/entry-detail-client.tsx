@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Markdown } from "@/components/markdown";
+import { fmtMoney } from "@/lib/format";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -250,7 +251,7 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-bold font-mono text-[var(--accent)]">{ts.themeSlug}</span>
                   {ts.confidence && (
-                    <span className="badge text-[10px] bg-[var(--soft)]">{ts.confidence}% conf.</span>
+                    <span className="badge text-[10px] bg-[var(--soft)]">conf {ts.confidence}/5</span>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
@@ -295,7 +296,7 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                     <span className="text-[var(--muted)] font-mono">{claim.themeSlug}</span>
                   )}
                   {claim.confidence && (
-                    <span className="text-[var(--muted)] bg-[var(--soft)] px-1 rounded">{claim.confidence}% conf.</span>
+                    <span className="text-[var(--muted)] bg-[var(--soft)] px-1 rounded">conf {claim.confidence}/5</span>
                   )}
                   {claim.importance && (
                     <span className={`px-1 rounded ${claim.importance === "HIGH" ? "bg-[var(--bad)]/10 text-[var(--bad)]" : claim.importance === "MEDIUM" ? "bg-[var(--warn)]/10 text-[var(--warn)]" : "bg-[var(--good)]/10 text-[var(--good)]"}`}>
@@ -434,10 +435,10 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                       </span>
                     )}
                   </div>
-                  {tm.role && <p className="text-[10px] text-[var(--muted)] line-clamp-1">{tm.role}</p>}
-                  <div className="flex items-center justify-between text-[9px] text-[var(--muted)] mt-1">
+                  {tm.role && <p className="text-[11px] text-[var(--muted)] line-clamp-1">{tm.role}</p>}
+                  <div className="flex items-center justify-between text-[11px] text-[var(--muted)] mt-1">
                     <span>{tm.themeSlug || "No theme"}</span>
-                    {tm.confidence && <span>{tm.confidence}% conf.</span>}
+                    {tm.confidence && <span>conf {tm.confidence}/5</span>}
                   </div>
                 </div>
               );
@@ -455,6 +456,9 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
           <h3 className="font-bold text-sm uppercase tracking-wide text-[var(--muted)] border-b border-[var(--border)] pb-2 flex items-center gap-1">
             <Target size={14} className="text-[var(--good)]" /> Analyst Price Targets ({entry.analystTargets.length})
           </h3>
+          {entry.analystTargets.length > 0 && (
+            <p className="text-[11px] italic text-[var(--muted)]">Extracted from the pasted LLM output — verify against a primary source before acting.</p>
+          )}
           <div className="space-y-2 max-h-[220px] overflow-y-auto">
             {entry.analystTargets.map((at) => (
               <div key={at.id} className="p-2.5 rounded border border-[var(--border)] bg-[var(--bg)] text-xs flex flex-wrap items-center justify-between gap-2 hover:border-[var(--accent)] transition">
@@ -465,7 +469,7 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                     </Link>
                     <span className="font-semibold text-[var(--text)]">{at.firm || "Unknown Firm"}</span>
                   </div>
-                  <div className="text-[10px] text-[var(--muted)]">
+                  <div className="text-[11px] text-[var(--muted)]">
                     Rating: <span className="font-medium text-[var(--text)]">{at.rating || "—"}</span> {at.date && `· ${new Date(at.date).toLocaleDateString()}`}
                   </div>
                 </div>
@@ -473,15 +477,15 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                   {at.target && (
                     <div className="font-mono font-bold text-[var(--text)]">
                       {at.previousTarget ? (
-                        <span className="text-[10px] text-[var(--muted)] font-normal line-through mr-1">${at.previousTarget}</span>
+                        <span className="text-[11px] text-[var(--muted)] font-normal line-through mr-1">{fmtMoney(at.previousTarget)}</span>
                       ) : null}
                       <span className={at.previousTarget && at.target > at.previousTarget ? "text-[var(--good)] font-bold" : at.previousTarget && at.target < at.previousTarget ? "text-[var(--bad)] font-bold" : ""}>
-                        ${at.target}
+                        {fmtMoney(at.target)}
                       </span>
                     </div>
                   )}
                   {at.sourceUrl && (
-                    <a href={at.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-[var(--accent)] hover:underline block">
+                    <a href={at.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--accent)] hover:underline block">
                       Source Link
                     </a>
                   )}
@@ -510,7 +514,7 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                 <span className="text-[var(--warn)] font-bold">?</span>
                 <div className="space-y-1">
                   <p className="font-medium leading-relaxed">{q.text}</p>
-                  <div className="flex gap-2 text-[9px] text-[var(--muted)] font-mono">
+                  <div className="flex gap-2 text-[11px] text-[var(--muted)] font-mono">
                     {q.ticker && <span>ticker: ${q.ticker}</span>}
                     {q.themeSlug && <span>theme: {q.themeSlug}</span>}
                   </div>
@@ -536,7 +540,7 @@ export function EntryDetailClient({ entry }: { entry: DetailEntry }) {
                 <span className="text-[var(--accent)] font-semibold">⏰</span>
                 <div className="space-y-1">
                   <p className="font-medium leading-relaxed">{wi.text}</p>
-                  <div className="flex flex-wrap gap-2 text-[9px] text-[var(--muted)] font-mono">
+                  <div className="flex flex-wrap gap-2 text-[11px] text-[var(--muted)] font-mono">
                     {wi.ticker && <span>ticker: ${wi.ticker}</span>}
                     {wi.themeSlug && <span>theme: {wi.themeSlug}</span>}
                     {wi.timeframe && <span className="bg-[var(--soft)] px-1 rounded">timeframe: {wi.timeframe}</span>}
